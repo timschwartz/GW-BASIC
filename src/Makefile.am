@@ -1,3 +1,3 @@
 # Source directory Makefile
 
-SUBDIRS = Tokenizer ProgramStore InterpreterLoop
+SUBDIRS = Tokenizer ProgramStore InterpreterLoop ExpressionEvaluator

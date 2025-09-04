@@ -27,5 +27,6 @@ AC_CONFIG_FILES([Makefile
                  src/Makefile
                  src/Tokenizer/Makefile
                  src/ProgramStore/Makefile
-                 src/InterpreterLoop/Makefile])
+                 src/InterpreterLoop/Makefile
+                 src/ExpressionEvaluator/Makefile])
 AC_OUTPUT
