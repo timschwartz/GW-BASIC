@@ -4,4 +4,6 @@ Write C++20 compatible code.
 
 Put classes in namespace "gw".
 
+Header files should end in ".hpp".
+
 Do not omit "this" when referencing member variables.

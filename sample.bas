@@ -1,0 +1,19 @@
+10 REM Sample GW-BASIC Program
+20 CLS
+30 PRINT "Welcome to the Circle Drawing Program"
+40 PRINT
+50 INPUT "Enter circle radius: "; R
+60 IF R <= 0 THEN GOTO 50
+70 SCREEN 2
+80 FOR ANGLE = 0 TO 360 STEP 5
+90 X = 160 + R * COS(ANGLE * 3.14159 / 180)
+100 Y = 100 + R * SIN(ANGLE * 3.14159 / 180)
+110 PSET (X, Y)
+120 NEXT ANGLE
+130 CIRCLE (160, 100), R
+140 LOCATE 23, 1
+150 PRINT "Press any key to continue..."
+160 A$ = INKEY$: IF A$ = "" THEN 160
+170 SCREEN 0
+180 PRINT "Goodbye!"
+190 END
