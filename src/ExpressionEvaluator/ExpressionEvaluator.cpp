@@ -243,7 +243,7 @@ Value ExpressionEvaluator::parsePrimary(const std::vector<uint8_t>& b, size_t& p
         // Try external resolver first
         if (env.getVar) {
             Value ext{};
-            if (env.getVar(id, ext)) return ext;
+            if (env.getVar(id, ext)) { return ext; }
         }
         auto it = env.vars.find(id);
         if (it != env.vars.end()) return it->second;
@@ -301,10 +301,10 @@ Value ExpressionEvaluator::parseExpression(const std::vector<uint8_t>& b, size_t
             if (op.op == "+") lhs = makeNumericResult(a, c, a + c, bothInt, false);
             else if (op.op == "-") lhs = makeNumericResult(a, c, a - c, bothInt, false);
             else if (op.op == "*") lhs = makeNumericResult(a, c, a * c, bothInt, false);
-            else if (op.op == "/") lhs = Double{a / c};
+            else if (op.op == "/") { if (c == 0.0) throw BasicError(11, "Division by zero", pos); lhs = Double{a / c}; }
             else if (op.op == "^") lhs = Double{std::pow(a, c)};
-            else if (op.op == "\\") lhs = Int16{static_cast<int16_t>(static_cast<long long>(std::floor(a / c)))};
-            else if (op.op == "MOD") lhs = Int16{static_cast<int16_t>(static_cast<long long>(a) % static_cast<long long>(c))};
+            else if (op.op == "\\") { if (c == 0.0) throw BasicError(11, "Division by zero", pos); lhs = Int16{static_cast<int16_t>(static_cast<long long>(std::floor(a / c)))}; }
+            else if (op.op == "MOD") { if (static_cast<long long>(c) == 0ll) throw BasicError(11, "Division by zero", pos); lhs = Int16{static_cast<int16_t>(static_cast<long long>(a) % static_cast<long long>(c))}; }
             skipSpaces(b, pos);
             continue;
         }

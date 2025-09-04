@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <variant>
 #include <vector>
+#include <functional>
 
 class Tokenizer;
 
@@ -53,6 +54,10 @@ public:
     // Truthiness: 0 -> 0, nonzero -> -1 (GW-BASIC boolean)
     static int16_t toBoolInt(const Value& v);
 
+    // Numeric conversions for integration points
+    static double toDouble(const Value& v);
+    static int16_t toInt16(const Value& v);
+
 private:
     std::shared_ptr<Tokenizer> tokenizer;
 
@@ -82,8 +87,6 @@ private:
 
     // Arithmetic helpers
     static bool isNumeric(const Value& v);
-    static double toDouble(const Value& v);
-    static int16_t toInt16(const Value& v);
     static Value makeNumericResult(double a, double b, double result, bool bothInt, bool forceInt);
 };
 

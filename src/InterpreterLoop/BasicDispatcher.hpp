@@ -200,7 +200,7 @@ private:
         }
         ++pos; // consume '=' (ASCII or tokenized)
         skipSpaces(b, pos);
-        auto res = ev.evaluate(b, pos, env);
+    auto res = ev.evaluate(b, pos, env);
         // Store into runtime variable table
         toRuntimeValue(name, res.value);
         pos = res.nextPos;
@@ -231,7 +231,7 @@ private:
     }
 
     uint16_t doIF(const std::vector<uint8_t>& b, size_t& pos) {
-        skipSpaces(b, pos);
+    skipSpaces(b, pos);
     auto res = ev.evaluate(b, pos, env);
     pos = res.nextPos;
         // Expect THEN
