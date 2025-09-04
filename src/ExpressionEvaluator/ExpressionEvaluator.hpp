@@ -24,7 +24,9 @@ using Value = std::variant<Int16, Single, Double, Str>;
 // Evaluation environment (variables, options, built-ins later)
 struct Env {
     int optionBase{0};
-    std::unordered_map<std::string, Value> vars;
+    // Optional: external variable resolver; if set, used before local map.
+    std::function<bool(const std::string& name, Value& out)> getVar;
+    std::unordered_map<std::string, Value> vars; // fallback/local storage
 };
 
 // Evaluation result with next token position
@@ -60,6 +62,29 @@ private:
     // Primaries and helpers
     Value parsePrimary(const std::vector<uint8_t>& b, size_t& pos, Env& env);
     bool atEnd(const std::vector<uint8_t>& b, size_t pos) const;
+
+    // Utilities
+    static void skipSpaces(const std::vector<uint8_t>& b, size_t& pos);
+    static bool isAsciiSpace(uint8_t c);
+    static bool isAsciiDigit(uint8_t c);
+    static bool isAsciiAlpha(uint8_t c);
+    static bool isAsciiAlnum(uint8_t c);
+
+    // Token decoding helpers for Tokenizer-encoded numbers/strings
+    static bool tryDecodeNumber(const std::vector<uint8_t>& b, size_t& pos, Value& out);
+    static bool tryDecodeString(const std::vector<uint8_t>& b, size_t& pos, Value& out);
+    static std::string readIdentifier(const std::vector<uint8_t>& b, size_t& pos);
+
+    // Operator handling
+    struct OpInfo { std::string op; int lbp; int rbp; bool rightAssoc; };
+    OpInfo peekOperator(const std::vector<uint8_t>& b, size_t pos) const;
+    static bool isComparison(const std::string& op);
+
+    // Arithmetic helpers
+    static bool isNumeric(const Value& v);
+    static double toDouble(const Value& v);
+    static int16_t toInt16(const Value& v);
+    static Value makeNumericResult(double a, double b, double result, bool bothInt, bool forceInt);
 };
 
 } // namespace expr

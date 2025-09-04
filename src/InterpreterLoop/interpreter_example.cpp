@@ -5,6 +5,7 @@
 #include "InterpreterLoop.hpp"
 #include "../ProgramStore/ProgramStore.hpp"
 #include "../Tokenizer/Tokenizer.hpp"
+#include "BasicDispatcher.hpp"
 
 // Super-minimal demo statement handler:
 // - If first nonzero byte is PRINT (0x90) then detokenize and echo
@@ -27,23 +28,37 @@ int main() {
 
     // Populate a tiny program: 10 PRINT "HI" : 20 END
     {
-        auto t10 = tokenizer->crunch("10 PRINT \"HI\"");
-        t10.push_back(0x00);
+        // Crunch without the line number; ProgramStore inserts line number separately
+        auto t10 = tokenizer->crunch("PRINT \"HI\"");
         store->insertLine(10, t10);
-        auto t20 = tokenizer->crunch("20 END");
-        t20.push_back(0x00);
+        auto t20 = tokenizer->crunch("END");
         store->insertLine(20, t20);
     }
 
-    InterpreterLoop loop(store, tokenizer);
-    loop.setStatementHandler([&](const std::vector<uint8_t>& tokens){
-        return demoHandler(*tokenizer, tokens);
-    });
-    loop.setTrace(true);
-    loop.setTraceCallback([&](uint16_t line, const std::vector<uint8_t>& tokens){
-        if (line) std::cerr << "[TRACE] line " << line << "\n";
-        else std::cerr << "[TRACE] immediate" << "\n";
-    });
+    // Add a line with multiple statements and IF/ELSE to smoke test dispatcher
+    {
+        auto t15 = tokenizer->crunch("A=1:IF A THEN PRINT \"T\" ELSE PRINT \"F\"");
+        store->insertLine(15, t15);
+    }
+
+        InterpreterLoop loop(store, tokenizer);
+        loop.setTrace(true);
+        loop.setTraceCallback([&](uint16_t line, const std::vector<uint8_t>&){
+            std::cout << "[TRACE] Executing line " << line << std::endl;
+        });
+        BasicDispatcher disp(tokenizer);
+        loop.setStatementHandler([&](const std::vector<uint8_t>& bytes){
+            try {
+                auto j = disp(bytes);
+                if (j == 0xFFFF) { loop.stop(); return uint16_t{0}; }
+                return j;
+            } catch (const expr::BasicError& e) {
+                std::cerr << "[RUNTIME ERROR] " << e.what() << "\n";
+                std::cerr << "Line: " << tokenizer->detokenize(bytes) << "\n";
+                loop.stop();
+                return uint16_t{0};
+            }
+        });
 
     loop.run();
     return 0;
