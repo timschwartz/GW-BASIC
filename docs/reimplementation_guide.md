@@ -35,6 +35,27 @@ A practical blueprint to rebuild the 8086 GW-BASIC in another language, preservi
   - String descriptors (len, ptr). Temp descriptor pool for expressions. GC when temp pool exhausted or on demand.
   - Arrays with descriptors and bounds; `DEF*` default-type table (`DEFTBL`) drives variable typing.
 
+### C++ mapping (reference skeleton)
+
+- Types
+  - `StrDesc { uint16_t len; uint8_t* ptr; }` in `src/Runtime/StringTypes.hpp` for short strings (≤255 chars).
+  - `TempStrPool` holds temporary string descriptors produced during expression evaluation.
+  - `StringHeap` in `src/Runtime/StringHeap.hpp` implements a grow-down arena with deterministic compacting GC given a root set.
+  - `Array`/`Dim` in `src/Runtime/ArrayTypes.hpp` model typed arrays; for string arrays, `data` stores contiguous `StrDesc` entries; characters reside in `StringHeap`.
+
+- GC integration
+  - Collect roots: variable table, string array elements, runtime stacks (FOR/GOSUB/ERR), evaluator temps (`TempStrPool`).
+  - Trigger `heap.compact(roots)` on allocation failure, `FRE`, `CLEAR`, and optionally at statement boundaries.
+  - Post-compact, `StrDesc.ptr` are updated in-place; copying is done in root order.
+
+- LHS string assignment helpers
+  - Use `overwrite_left/right/mid(...)` from `StringHeap.hpp` to implement `LEFT$()/RIGHT$()/MID$()` assignment without changing target length.
+
+- Arrays
+  - After setting `rank` and `dims[k].lb/ub`, call `finalizeStrides(Array&)` so rightmost index varies fastest.
+  - Access: `elemPtr(subscripts)`; for `String` arrays, cast to `StrDesc*` and assign new heap-allocated strings.
+  - `ERASE` should clear string descriptors (len=0, ptr=null) and optionally trigger GC.
+
 - Devices and files
   - Device registry and dispatch interface: init/term, OPN/CLS, SIN/SOT, RND, EOF/LOC/LOF, GPS/GWD, SCW/GCW.
   - Disk files: sequential text/binary, random access records, `KILL/NAME/FILES`, append semantics.

@@ -10,7 +10,8 @@ AC_PROG_CXX
 AM_INIT_AUTOMAKE([subdir-objects])
 
 # Checks for libraries.
-PKG_CHECK_MODULES([CATCH2], [catch2-with-main])
+PKG_CHECK_MODULES([CATCH2], [catch2-with-main], [have_catch2=yes], [have_catch2=no])
+AM_CONDITIONAL([HAVE_CATCH2], [test "x$have_catch2" = "xyes"])
 
 # Checks for header files.
 
@@ -29,5 +30,6 @@ AC_CONFIG_FILES([Makefile
                  src/ProgramStore/Makefile
                  src/InterpreterLoop/Makefile
                  src/ExpressionEvaluator/Makefile
-                 src/NumericEngine/Makefile])
+                 src/NumericEngine/Makefile
+                 tests/Makefile])
 AC_OUTPUT
