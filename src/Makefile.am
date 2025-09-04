@@ -1,3 +1,3 @@
 # Source directory Makefile
 
-SUBDIRS = Tokenizer
+SUBDIRS = Tokenizer ProgramStore

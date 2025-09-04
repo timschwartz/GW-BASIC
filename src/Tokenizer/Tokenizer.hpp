@@ -1,5 +1,4 @@
-#ifndef TOKENIZER_H
-#define TOKENIZER_H
+#pragma once
 
 #include <string>
 #include <vector>
@@ -210,4 +209,3 @@ private:
     static constexpr uint8_t TOKEN_LOCATE = 0xC9;
 };
 
-#endif // TOKENIZER_H

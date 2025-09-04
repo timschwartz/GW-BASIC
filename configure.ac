@@ -25,5 +25,6 @@ AC_TYPE_UINT8_T
 
 AC_CONFIG_FILES([Makefile 
                  src/Makefile
-                 src/Tokenizer/Makefile])
+                 src/Tokenizer/Makefile
+                 src/ProgramStore/Makefile])
 AC_OUTPUT
