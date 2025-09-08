@@ -24,8 +24,10 @@
 // Returns next-line override (0 for fallthrough). Throws on errors.
 class BasicDispatcher {
 public:
-    BasicDispatcher(std::shared_ptr<Tokenizer> t)
-        : tok(std::move(t)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)) {
+    using PrintCallback = std::function<void(const std::string&)>;
+    
+    BasicDispatcher(std::shared_ptr<Tokenizer> t, PrintCallback printCb = nullptr)
+        : tok(std::move(t)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), printCallback(printCb) {
         // Wire evaluator env to read variables from VariableTable
         env.optionBase = 0;
         env.vars.clear();
@@ -82,6 +84,7 @@ private:
     uint8_t heapBuf[8192]{};
     gwbasic::StringHeap strHeap;
     expr::Env env;
+    PrintCallback printCallback;
 
     // Helpers to convert between runtime Value and evaluator Value
     static expr::Value toExprValue(const gwbasic::Value& v) {
@@ -151,22 +154,38 @@ private:
     uint16_t doPRINT(const std::vector<uint8_t>& b, size_t& pos) {
         bool newLine = true; // default prints newline
         bool first = true;
+        std::string output;
+        
         while (!atEnd(b, pos)) {
             skipSpaces(b, pos);
             if (atEnd(b, pos)) break;
             if (b[pos] == ';') { newLine = false; ++pos; continue; }
-            if (b[pos] == ',') { std::cout << "\t"; ++pos; first = false; continue; }
+            if (b[pos] == ',') { output += "\t"; ++pos; first = false; continue; }
             // Expression
             auto res = ev.evaluate(b, pos, env);
             pos = res.nextPos;
-            std::visit([&](auto&& x){ using T = std::decay_t<decltype(x)>; if constexpr (std::is_same_v<T, expr::Str>) std::cout << x.v; else if constexpr (std::is_same_v<T, expr::Int16>) std::cout << x.v; else if constexpr (std::is_same_v<T, expr::Single>) std::cout << x.v; else if constexpr (std::is_same_v<T, expr::Double>) std::cout << x.v; }, res.value);
+            std::visit([&](auto&& x){ 
+                using T = std::decay_t<decltype(x)>; 
+                if constexpr (std::is_same_v<T, expr::Str>) output += x.v; 
+                else if constexpr (std::is_same_v<T, expr::Int16>) output += std::to_string(x.v); 
+                else if constexpr (std::is_same_v<T, expr::Single>) output += std::to_string(x.v); 
+                else if constexpr (std::is_same_v<T, expr::Double>) output += std::to_string(x.v); 
+            }, res.value);
             first = false;
             skipSpaces(b, pos);
             if (!atEnd(b, pos) && b[pos] == ':') { ++pos; break; }
             if (!atEnd(b, pos) && b[pos] == ';') { newLine = false; ++pos; }
-            if (!atEnd(b, pos) && b[pos] == ',') { std::cout << "\t"; ++pos; }
+            if (!atEnd(b, pos) && b[pos] == ',') { output += "\t"; ++pos; }
         }
-        if (newLine) std::cout << "\n";
+        if (newLine) output += "\n";
+        
+        // Send output to callback if available, otherwise fall back to cout
+        if (printCallback) {
+            printCallback(output);
+        } else {
+            std::cout << output;
+        }
+        
         return 0;
     }
 
