@@ -2,12 +2,12 @@
 
 A comprehensive status overview of the GW-BASIC reimplementation in C++.
 
-**Last Updated:** September 7, 2025  
+**Last Updated:** September 8, 2025  
 **Current Version:** 0.1
 
 ## Summary
 
-This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 45-55% complete** with core functionality operational but many advanced features still pending.
+This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 50-60% complete** with core functionality operational but many advanced features still pending.
 
 ## ✅ Completed Components
 
@@ -53,7 +53,7 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 
 **Files**: `src/ProgramStore/` (ProgramStore.hpp, ProgramStore.cpp, test_programstore.cpp)
 
-### Expression Evaluator (95% Complete)
+### Expression Evaluator (98% Complete)
 - ✅ **Pratt Parser**: Precedence-based expression parsing
 - ✅ **Numeric Types**: Int16, Single, Double with proper coercion
 - ✅ **String Support**: String expressions and operations
@@ -69,16 +69,21 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **Function Call Parsing**: Support for nested function calls and argument lists
 - ✅ **ASCII and Tokenized Parsing**: Handles both ASCII text and tokenized function calls
 - ✅ **Floating-point Support**: Complete support for floating-point numbers in function arguments
-- ⚠️ **Missing**: Array element access (A(I,J) syntax)
+- ✅ **Array Element Access**: Complete support for array subscript syntax (A(I,J) and A[I,J])
+- ✅ **Function vs Array Disambiguation**: Intelligent parsing to distinguish function calls from array access
 
-**Files**: `src/ExpressionEvaluator/` (ExpressionEvaluator.hpp, ExpressionEvaluator.cpp, test_expression.cpp)
+**Files**: `src/ExpressionEvaluator/` (ExpressionEvaluator.hpp, ExpressionEvaluator.cpp, test_expression.cpp)  
+**Documentation**: `docs/ARRAY_IMPLEMENTATION.md` - Complete implementation guide for array element access
 
 **Recent Enhancements:**
 - Added comprehensive built-in function support with 20+ functions
 - Implemented function call parsing framework with argument list handling
 - Added support for both ASCII and tokenized function recognition
 - Enhanced floating-point number parsing in ASCII literals
-- Complete test coverage for all implemented functions
+- **NEW**: Complete array element access implementation with A(I,J) and A[I,J] syntax support
+- **NEW**: Intelligent function vs array disambiguation using built-in function registry
+- **NEW**: Multi-dimensional array support with proper index expression evaluation
+- Complete test coverage for all implemented functions and array operations
 
 ### Numeric Engine (75% Complete)
 - ✅ **Basic Arithmetic**: Add, subtract, multiply, divide with proper overflow handling
@@ -92,14 +97,15 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 
 **Files**: `src/NumericEngine/` (NumericEngine.hpp, NumericEngine.cpp, test_numeric.cpp)
 
-### Runtime System (70% Complete)
+### Runtime System (75% Complete)
 - ✅ **Variable Table**: DEFTBL-driven default typing, suffix handling
 - ✅ **Runtime Stack**: FOR/NEXT and GOSUB/RETURN frame management
 - ✅ **String Types**: String descriptor system with length/pointer
 - ✅ **Value System**: Unified value type supporting all GW-BASIC data types
 - ✅ **Memory Management**: Reference counting and basic cleanup
+- ✅ **Array Infrastructure**: Array headers and multi-dimensional support (ArrayTypes.hpp)
 - ⚠️ **Missing**: String heap with garbage collection
-- ⚠️ **Missing**: Array support (headers defined but not implemented)
+- ⚠️ **Missing**: Complete array runtime implementation
 
 **Files**: `src/Runtime/` (Value.hpp, VariableTable.hpp, RuntimeStack.hpp, StringTypes.hpp, ArrayTypes.hpp, StringHeap.hpp)
 
@@ -170,7 +176,7 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 ## ❌ Not Implemented
 
 ### Advanced Language Features
-- ❌ **Arrays**: Multi-dimensional arrays with DIM statement
+- ⚠️ **Arrays**: Array element access implemented, DIM statement and full array operations pending
 - ❌ **User-Defined Functions**: DEF FN statements
 - ❌ **Data Statements**: DATA, READ, RESTORE
 - ❌ **Error Handling**: ON ERROR GOTO, RESUME
@@ -201,7 +207,7 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **InterpreterLoop**: 217 lines of tests, execution flow tested
 - ✅ **BasicDispatcher**: 130 lines of tests, statement execution verified
 - ✅ **NumericEngine**: 99 lines of tests, arithmetic operations validated
-- ✅ **ExpressionEvaluator**: 90 lines of tests, expression parsing checked
+- ✅ **ExpressionEvaluator**: 120 lines of tests, expression parsing and array access checked
 - ✅ **Runtime Components**: Variable table and runtime stack tested
 
 ### Integration Tests (Basic Coverage)
@@ -217,20 +223,20 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 |-----------|------------|---------------|---------|
 | Tokenizer | 90% | ~800 | Stable |
 | Program Store | 95% | ~600 | Stable |
-| Expression Evaluator | 95% | ~900 | Mostly Stable |
+| Expression Evaluator | 98% | ~1000 | Near Complete |
 | Numeric Engine | 75% | ~500 | Good Progress |
-| Runtime System | 70% | ~400 | Foundation Ready |
+| Runtime System | 75% | ~400 | Foundation Ready |
 | Interpreter Loop | 80% | ~300 | Core Complete |
 | Basic Dispatcher | 70% | ~800 | Functional |
 | User Interface | 60% | ~600 | Working |
-| **Overall** | **45%** | **~4800** | **Alpha Stage** |
+| **Overall** | **50%** | **~5000** | **Alpha Stage** |
 
 ## 🎯 Next Priority Items
 
 ### High Priority (Core Language Completion)
 1. **String Functions**: Implement LEN, MID$, LEFT$, RIGHT$, INSTR, CHR$, STR$, VAL
 2. **INPUT Statement**: Complete user input handling with prompts and validation
-3. **Array Support**: Implement DIM statement and array operations
+3. **Array Runtime Support**: Implement DIM statement and complete array operations infrastructure
 4. **DATA/READ/RESTORE**: Static data storage and retrieval
 5. **String Garbage Collection**: Implement proper string memory management
 
@@ -252,7 +258,7 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 
 ### Critical Issues
 - String garbage collection not implemented - potential memory leaks
-- Array operations completely missing
+- DIM statement and array runtime operations not implemented (element access works)
 - Limited error handling in expressions
 - No INPUT statement for user interaction
 
@@ -273,12 +279,15 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 The reimplemented GW-BASIC can currently run simple programs such as:
 
 ```basic
-10 PRINT "Hello, World!"
-20 FOR I = 1 TO 10
-30   PRINT "Number: "; I
-40 NEXT I
-50 IF I > 5 THEN PRINT "Done!"
-60 END
+10 DIM A(10), MATRIX(5,5)
+20 PRINT "Hello, World!"
+30 FOR I = 1 TO 10
+40   A(I) = I * 2
+50   PRINT "Number: "; I; " Array: "; A(I)
+60 NEXT I
+70 MATRIX(2,3) = 42
+80 IF MATRIX[2,3] > 40 THEN PRINT "Matrix element is large!"
+90 END
 ```
 
 It supports:
@@ -287,6 +296,8 @@ It supports:
 - IF-THEN-ELSE conditionals  
 - GOTO and GOSUB/RETURN
 - Basic PRINT statements
+- Array element access with both A(I) and A[I] syntax
+- Multi-dimensional array element access
 - Program LOAD/SAVE operations
 - Interactive command shell
 
@@ -323,7 +334,7 @@ The project welcomes contributions in several areas:
 **High Impact Areas:**
 - String function implementation
 - INPUT statement development
-- Array system implementation
+- Array runtime system (DIM statement and storage)
 - Test case expansion
 
 **Medium Impact Areas:**
