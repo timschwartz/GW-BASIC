@@ -1,3 +1,4 @@
+test_event_traps
 test_runtime_stack
 test_variable_table
 test_array_manager

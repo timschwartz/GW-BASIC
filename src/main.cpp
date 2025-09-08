@@ -1,5 +1,6 @@
 #include <SDL3/SDL.h>
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <vector>
 #include <memory>
@@ -86,6 +87,9 @@ public:
         dispatcher = std::make_unique<BasicDispatcher>(tokenizer, programStore,
             [this](const std::string& text) { print(text); });
         
+        // Connect event trap system between interpreter and dispatcher
+        interpreter->setEventTrapSystem(dispatcher->getEventTrapSystem());
+        
         // Set up interpreter with our dispatcher
         interpreter->setStatementHandler([this](const std::vector<uint8_t>& tokens, uint16_t currentLine) -> uint16_t {
             try {
@@ -107,6 +111,80 @@ public:
     
     ~GWBasicShell() {
         cleanup();
+    }
+    
+    // Load a BASIC program from file
+    bool loadFile(const std::string& filename) {
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            print("?File not found: ");
+            print(filename);
+            print("\n");
+            return false;
+        }
+
+        // Clear current program
+        programStore->clear();
+
+        // Read file line by line
+        std::string line;
+        int linesLoaded = 0;
+        while (std::getline(file, line)) {
+            if (line.empty()) continue;
+            
+            // Parse line number if present
+            std::istringstream iss(line);
+            std::string token;
+            iss >> token;
+            
+            uint16_t lineNum = 0;
+            if (std::isdigit(token[0])) {
+                try {
+                    lineNum = static_cast<uint16_t>(std::stoul(token));
+                    // Get rest of line
+                    std::string restOfLine;
+                    std::getline(iss, restOfLine);
+                    if (!restOfLine.empty() && restOfLine[0] == ' ') {
+                        restOfLine = restOfLine.substr(1); // remove leading space
+                    }
+                    
+                    // Tokenize and store the line
+                    if (!restOfLine.empty()) {
+                        auto tokens = tokenizer->crunch(restOfLine);
+                        programStore->insertLine(lineNum, tokens);
+                        linesLoaded++;
+                    }
+                } catch (const std::exception& e) {
+                    print("?Syntax error in line ");
+                    print(std::to_string(lineNum));
+                    print(": ");
+                    print(e.what());
+                    print("\n");
+                }
+            } else {
+                // Line without line number - treat as immediate command
+                print("?Line number required: ");
+                print(line);
+                print("\n");
+            }
+        }
+        
+        file.close();
+        
+        if (linesLoaded > 0) {
+            programMode = true;
+            print("Loaded ");
+            print(std::to_string(linesLoaded));
+            print(" lines from ");
+            print(filename);
+            print("\n");
+            return true;
+        } else {
+            print("?No valid program lines found in ");
+            print(filename);
+            print("\n");
+            return false;
+        }
     }
     
     bool initialize() {
@@ -292,6 +370,11 @@ private:
         SDL_Keycode keycode = key.key;
         bool shift = (key.mod & SDL_KMOD_SHIFT) != 0;
         bool ctrl = (key.mod & SDL_KMOD_CTRL) != 0;
+        
+        // Inject key event for trap handling
+        if (interpreter) {
+            interpreter->injectKeyEvent(static_cast<uint8_t>(key.scancode), true);
+        }
         
         if (ctrl) {
             handleControlKey(keycode);
@@ -713,14 +796,48 @@ private:
 };
 
 int main(int argc, char* argv[]) {
-    (void)argc; // Suppress unused parameter warning
-    (void)argv;
+    // Show usage if help is requested
+    if (argc > 1 && (std::string(argv[1]) == "--help" || std::string(argv[1]) == "-h")) {
+        std::cout << "GW-BASIC Interpreter v0.1\n";
+        std::cout << "Usage: " << argv[0] << " [filename.bas]\n";
+        std::cout << "\n";
+        std::cout << "If a filename is provided, it will be loaded automatically at startup.\n";
+        std::cout << "The file should contain BASIC program lines with line numbers.\n";
+        std::cout << "\n";
+        std::cout << "Example:\n";
+        std::cout << "  " << argv[0] << " program.bas\n";
+        std::cout << "\n";
+        std::cout << "Interactive commands:\n";
+        std::cout << "  LIST      - List the current program\n";
+        std::cout << "  RUN       - Run the current program\n";
+        std::cout << "  NEW       - Clear the current program\n";
+        std::cout << "  LOAD \"filename\" - Load a program from file\n";
+        std::cout << "  SAVE \"filename\" - Save the current program to file\n";
+        std::cout << "  SYSTEM    - Exit the interpreter\n";
+        return 0;
+    }
     
     GWBasicShell shell;
     
     if (!shell.initialize()) {
         std::cerr << "Failed to initialize GW-BASIC shell" << std::endl;
         return 1;
+    }
+    
+    // Check for command line filename argument
+    if (argc > 1) {
+        std::string filename = argv[1];
+        
+        // Check if file exists and has a reasonable extension
+        std::ifstream testFile(filename);
+        if (testFile.good()) {
+            testFile.close();
+            shell.loadFile(filename);
+        } else {
+            std::cerr << "Error: Cannot open file '" << filename << "'" << std::endl;
+            // Continue anyway - user might want to create the file
+            shell.loadFile(filename); // This will show the error message in the UI
+        }
     }
     
     shell.run();

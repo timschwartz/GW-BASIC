@@ -8,7 +8,7 @@ if HAVE_CATCH2
 AM_CXXFLAGS = $(CATCH2_CFLAGS)
 LDADD = $(CATCH2_LIBS)
 
-check_PROGRAMS = test_variable_table test_runtime_stack test_string_heap test_string_manager test_array_manager
+check_PROGRAMS = test_variable_table test_runtime_stack test_string_heap test_string_manager test_array_manager test_event_traps
 
 test_variable_table_SOURCES = test_variable_table.cpp \
 	$(top_srcdir)/src/Runtime/VariableTable.hpp \
@@ -39,6 +39,10 @@ test_array_manager_SOURCES = test_array_manager.cpp \
 	$(top_srcdir)/src/Runtime/Value.hpp \
 	$(top_srcdir)/src/Runtime/StringHeap.hpp \
 	$(top_srcdir)/src/Runtime/StringTypes.hpp
+
+test_event_traps_SOURCES = test_event_traps.cpp \
+	$(top_srcdir)/src/Runtime/EventTraps.hpp \
+	$(top_srcdir)/src/Runtime/EventTraps.cpp
 
 TESTS = $(check_PROGRAMS)
 endif

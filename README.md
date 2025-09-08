@@ -9,7 +9,39 @@ A modern C++ reimplementation of Microsoft GW-BASIC, providing a compatible inte
 - **Expression Evaluator**: Mathematical and logical expression evaluation
 - **Control Flow**: Support for FOR-NEXT loops, IF-THEN, GOTO statements
 - **File I/O**: LOAD and SAVE commands for program persistence
+- **Event Traps**: Support for ON KEY, ON ERROR, ON TIMER event handling
+- **Command Line Loading**: Automatic file loading from command line arguments
 - **Interactive Shell**: SDL-based graphical interface
+
+## Usage
+
+The interpreter can be run in two ways:
+
+### Interactive Mode
+```bash
+./src/gw-basic
+```
+This opens the SDL-based graphical interface where you can type BASIC commands and programs interactively.
+
+### Command Line File Loading
+```bash
+./src/gw-basic program.bas
+```
+This automatically loads the specified BASIC program file at startup. The file should contain numbered BASIC program lines.
+
+### Help
+```bash
+./src/gw-basic --help
+```
+Shows usage information and available commands.
+
+### Available Commands in Interactive Mode
+- `LIST` - Display the current program
+- `RUN` - Execute the current program  
+- `NEW` - Clear the current program
+- `LOAD "filename"` - Load a program from file
+- `SAVE "filename"` - Save the current program to file
+- `SYSTEM` - Exit the interpreter
 
 ## Building
 

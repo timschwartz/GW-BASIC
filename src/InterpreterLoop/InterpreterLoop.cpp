@@ -5,6 +5,7 @@
 
 #include "../ProgramStore/ProgramStore.hpp"
 #include "../Tokenizer/Tokenizer.hpp"
+#include "../Runtime/EventTraps.hpp"
 
 InterpreterLoop::InterpreterLoop(std::shared_ptr<ProgramStore> program,
                                  std::shared_ptr<Tokenizer> tokenizer)
@@ -55,6 +56,19 @@ InterpreterLoop::StepResult InterpreterLoop::step() {
         // No more lines
         halted = true;
         return StepResult::Halted;
+    }
+    
+    // Check for event traps before executing each statement
+    if (eventTrapSystem) {
+        uint16_t trapLine = eventTrapSystem->checkForEvents();
+        if (trapLine != 0) {
+            // Event trap triggered - jump to handler
+            if (prog->hasLine(trapLine)) {
+                currentLine = trapLine;
+                prog->setCurrentLine(currentLine);
+                return StepResult::Jumped;
+            }
+        }
     }
 
     auto linePtr = prog->getLine(currentLine);
@@ -109,4 +123,13 @@ bool InterpreterLoop::executeImmediate(const std::string& source) {
 
 void InterpreterLoop::traceLine(uint16_t lineNum, const std::vector<uint8_t>& tokens) {
     if (trace) trace(lineNum, tokens);
+}
+
+void InterpreterLoop::injectKeyEvent(uint8_t scanCode, bool pressed) {
+    if (eventTrapSystem) {
+        eventTrapSystem->injectKeyEvent(scanCode, pressed);
+    }
+    if (keyEventCallback) {
+        keyEventCallback(scanCode, pressed);
+    }
 }

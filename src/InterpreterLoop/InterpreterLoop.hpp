@@ -9,6 +9,10 @@
 class ProgramStore;
 class Tokenizer;
 
+namespace gwbasic {
+    class EventTrapSystem;
+}
+
 /**
  * InterpreterLoop
  * 
@@ -27,6 +31,9 @@ public:
         Waiting       // Waiting for input or external event
     };
 
+    // Event handling callback: (keyCode, pressed)
+    using KeyEventCallback = std::function<void(uint8_t, bool)>;
+    
     // Diagnostic / trace callback: (lineNumber, rawTokens)
     using TraceCallback = std::function<void(uint16_t, const std::vector<uint8_t>&)>;
 
@@ -44,6 +51,13 @@ public:
     bool getTrace() const { return traceEnabled; }
     void setTraceCallback(TraceCallback cb) { trace = std::move(cb); }
     void setStatementHandler(StatementHandler cb) { handler = std::move(cb); }
+    void setKeyEventCallback(KeyEventCallback cb) { keyEventCallback = std::move(cb); }
+    
+    // Event trap system access
+    void setEventTrapSystem(gwbasic::EventTrapSystem* eventTraps) { eventTrapSystem = eventTraps; }
+    
+    // Event injection
+    void injectKeyEvent(uint8_t scanCode, bool pressed);
 
     // Program control
     void reset();
@@ -66,6 +80,8 @@ private:
     bool traceEnabled{false};
     TraceCallback trace{};
     StatementHandler handler{};
+    KeyEventCallback keyEventCallback{};
+    gwbasic::EventTrapSystem* eventTrapSystem{nullptr};
 
     uint16_t currentLine{0};
 

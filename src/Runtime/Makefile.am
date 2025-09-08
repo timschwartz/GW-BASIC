@@ -6,6 +6,8 @@ libruntime_la_SOURCES = \
     ArrayManager.cpp \
     ArrayManager.hpp \
     ArrayTypes.hpp \
+    EventTraps.cpp \
+    EventTraps.hpp \
     RuntimeStack.hpp \
     StringHeap.hpp \
     StringManager.hpp \

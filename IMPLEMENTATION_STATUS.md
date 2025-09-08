@@ -7,7 +7,7 @@ A comprehensive status overview of the GW-BASIC reimplementation in C++.
 
 ## Summary
 
-This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 75% complete** with core functionality operational, robust string memory management implemented, and complete array runtime support.
+This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 80% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, and comprehensive event trap handling.
 
 ## ✅ Completed Components
 
@@ -140,9 +140,9 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 
 **Files**: `src/Runtime/StringHeap.hpp`, `src/Runtime/StringManager.hpp`, `src/Runtime/StringTypes.hpp`, `tests/test_string_heap.cpp`, `tests/test_string_manager.cpp`
 
-### Runtime System (95% Complete)
+### Runtime System (98% Complete)
 - ✅ **Variable Table**: DEFTBL-driven default typing, suffix handling with StringRootProvider integration
-- ✅ **Runtime Stack**: FOR/NEXT and GOSUB/RETURN frame management
+- ✅ **Runtime Stack**: FOR/NEXT and GOSUB/RETURN frame management with error handling support
 - ✅ **String Types**: String descriptor system with length/pointer and temporary pool management
 - ✅ **Value System**: Unified value type supporting all GW-BASIC data types
 - ✅ **Memory Management**: Reference counting and basic cleanup
@@ -150,8 +150,9 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **String Heap with Garbage Collection**: Complete automatic memory management with mark-compact GC, configurable policies (OnDemand/Aggressive/Conservative), StringRootProvider pattern, string protection mechanism, and comprehensive statistics
 - ✅ **StringManager**: High-level interface for string operations including creation, concatenation, slicing (LEFT$, RIGHT$, MID$), search (INSTR), comparison, and RAII-managed temporary strings
 - ✅ **Array Runtime**: Complete array implementation with ArrayManager, DIM statement support, multi-dimensional arrays, and full integration with expression evaluator and variable table
+- ✅ **Event Trap System**: Complete EventTrapSystem with support for KEY, ERROR, TIMER, PEN, PLAY, STRIG, and COM events with trap configuration, event injection, and checking mechanisms
 
-**Files**: `src/Runtime/` (Value.hpp, VariableTable.hpp, RuntimeStack.hpp, StringTypes.hpp, ArrayTypes.hpp, ArrayManager.hpp, ArrayManager.cpp, StringHeap.hpp, StringManager.hpp)
+**Files**: `src/Runtime/` (Value.hpp, VariableTable.hpp, RuntimeStack.hpp, StringTypes.hpp, ArrayTypes.hpp, ArrayManager.hpp, ArrayManager.cpp, StringHeap.hpp, StringManager.hpp, EventTraps.hpp, EventTraps.cpp)
 
 **Recent Enhancements:**
 - ✅ **Complete Array Runtime**: Full ArrayManager implementation with create/access/modify operations for multi-dimensional arrays
@@ -161,18 +162,19 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **Array Element Access**: Full support for both A(I,J) and A[I,J] syntax in expressions with type coercion
 - ✅ **Comprehensive Testing**: All array operations validated through comprehensive test suite (test_array_manager)
 
-### Interpreter Loop (80% Complete)
+### Interpreter Loop (90% Complete)
 - ✅ **Execution Engine**: Step-by-step program execution
 - ✅ **Statement Dispatch**: Pluggable statement handler system
 - ✅ **Control Flow**: Program counter management, jumping
 - ✅ **Trace Support**: Debug tracing with callback system
 - ✅ **Immediate Mode**: Direct statement execution outside programs
 - ✅ **Error Handling**: Exception propagation and recovery
-- ⚠️ **Missing**: Event trap handling (ON KEY, ON ERROR, etc.)
+- ✅ **Event Trap Integration**: Event checking during execution loop for KEY, ERROR, and TIMER traps
+- ✅ **Key Event Injection**: Callback system for handling keyboard events in traps
 
 **Files**: `src/InterpreterLoop/` (InterpreterLoop.hpp, InterpreterLoop.cpp, test_interpreterloop.cpp)
 
-### Basic Dispatcher (85% Complete)
+### Basic Dispatcher (90% Complete)
 - ✅ **PRINT Statement**: Basic text output with separators (`;`, `,`)
 - ✅ **PRINT USING Statement**: Formatted numeric output with format patterns (###.##, comma separators, currency symbols, sign indicators, asterisk fill)
 - ✅ **LET/Assignment**: Variable assignment with type coercion
@@ -182,20 +184,24 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **FOR-NEXT Loops**: Complete loop implementation with STEP support
 - ✅ **GOTO/GOSUB/RETURN**: Jump statements with proper stack management
 - ✅ **ON GOTO/GOSUB**: Computed jumps with line number lists
+- ✅ **Event Trap Statements**: Complete ON KEY, ON ERROR, ON TIMER statement handling
+- ✅ **Trap Control Statements**: KEY ON/OFF, ERROR handling (doERROR, doRESUME, doKEY, doTIMER)
 - ✅ **END/STOP**: Program termination
 - ✅ **LOAD/SAVE**: Basic file I/O for program storage
-- ⚠️ **Missing**: INPUT, READ/DATA/RESTORE, most I/O statements
+- ⚠️ **Missing**: INPUT, READ/DATA/RESTORE, most other I/O statements
 
 **Files**: `src/InterpreterLoop/BasicDispatcher.hpp`
 
-### User Interface (60% Complete)
+### User Interface (70% Complete)
 - ✅ **SDL3 Integration**: Modern graphics framework for cross-platform support
 - ✅ **Text Mode Emulation**: 80x25 character display with CGA-style colors
-- ✅ **Keyboard Input**: Full keyboard handling with command history
+- ✅ **Keyboard Input**: Full keyboard handling with command history and event trap integration
 - ✅ **Interactive Shell**: Immediate mode and program entry
 - ✅ **Basic Commands**: LIST, RUN, NEW, CLEAR, SYSTEM
 - ✅ **Program Editing**: Line number-based program entry and editing
 - ✅ **Error Display**: Error messages and runtime feedback
+- ✅ **Command Line Loading**: Automatic file loading from command line arguments with --help support
+- ✅ **File Loading Integration**: Complete loadFile() method with error handling and user feedback
 - ⚠️ **Missing**: Function key support, advanced editing features
 - ⚠️ **Missing**: Screen positioning, cursor control
 
@@ -235,10 +241,10 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 
 ### Advanced Language Features
 - ✅ **Arrays**: Complete implementation - DIM statement support, array element access (A(I,J) and A[I,J) syntax), multi-dimensional arrays, and full integration with expression evaluator and variable table
+- ✅ **Event Traps**: Complete implementation - ON KEY, ON ERROR, ON TIMER event handling with EventTrapSystem, event injection, trap configuration, and integration with InterpreterLoop and BasicDispatcher
 - ❌ **User-Defined Functions**: DEF FN statements
 - ❌ **Data Statements**: DATA, READ, RESTORE
-- ❌ **Error Handling**: ON ERROR GOTO, RESUME
-- ❌ **Event Traps**: ON KEY, ON TIMER, ON PEN, etc.
+- ❌ **Error Handling**: Advanced error handling beyond basic traps
 
 ### Extended Statements
 - ❌ **String Manipulation**: Full string function library
@@ -270,18 +276,20 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **Runtime Components**: Variable table and runtime stack tested
 - ✅ **String Heap**: 105 test assertions, automatic GC and memory management validated
 - ✅ **String Manager**: 120 test assertions, string operations and temporary pool verified
+- ✅ **Event Traps**: 8 test assertions, event trap system and timer handling validated
 
 ### Integration Tests (Basic Coverage)
 - ✅ **GOSUB/RETURN**: Subroutine call mechanism
 - ✅ **LOAD Operations**: Program loading from files
 - ✅ **FOR/NEXT Loops**: Loop execution with various parameters
 
-### Test Status: **All tests passing** (5 runtime tests + 1 array manager test = 6 total runtime tests, 368 total assertions)
+### Test Status: **All tests passing** (6 runtime tests + 1 array manager test + 1 event traps test = 8 total runtime tests, 376 total assertions)
 
 **Recent Additions:**
 - ✅ **String Heap Tests**: 105 test assertions covering automatic GC, root provider integration, memory statistics, allocation failure handling
 - ✅ **String Manager Tests**: 120 test assertions covering string operations, temporary pool management, RAII helpers, error conditions
 - ✅ **Array Manager Tests**: 25 test assertions covering array creation, element access/modification, multi-dimensional arrays, bounds checking, and StringRootProvider integration
+- ✅ **Event Traps Tests**: 8 test assertions covering event trap configuration, timer events, key events, error events, and trap enabling/disabling
 
 ## 📊 Completion Estimates
 
@@ -291,11 +299,11 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 | Program Store | 95% | ~600 | Stable |
 | Expression Evaluator | 98% | ~1000 | Near Complete |
 | Numeric Engine | 95% | ~1200 | Near Complete |
-| Runtime System | 95% | ~1000 | Near Complete |
-| Interpreter Loop | 80% | ~300 | Core Complete |
-| Basic Dispatcher | 85% | ~1100 | Well Featured |
-| User Interface | 60% | ~600 | Working |
-| **Overall** | **75%** | **~6600** | **Beta Stage** |
+| Runtime System | 98% | ~1200 | Near Complete |
+| Interpreter Loop | 90% | ~350 | Core Complete |
+| Basic Dispatcher | 90% | ~1200 | Well Featured |
+| User Interface | 70% | ~700 | Working |
+| **Overall** | **80%** | **~7050** | **Beta Stage** |
 
 ## 🎯 Next Priority Items
 

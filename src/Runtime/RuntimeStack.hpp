@@ -25,6 +25,9 @@ struct GosubFrame {
 struct ErrFrame {
     uint16_t errCode{0};
     uint32_t resumeTextPtr{0};
+    uint16_t resumeLine{0};
+    uint16_t errorHandlerLine{0};  // ON ERROR GOTO target
+    bool trapEnabled{false};       // Error trapping enabled
 };
 
 class RuntimeStack {
@@ -46,11 +49,40 @@ public:
         out = gosubStack_.back(); gosubStack_.pop_back(); return true;
     }
 
-    // ERR/RESUME
+    // ERR/RESUME and error handling
     void pushErr(const ErrFrame& e) { errStack_.push_back(e); }
     bool popErr(ErrFrame& out) {
         if (errStack_.empty()) return false;
         out = errStack_.back(); errStack_.pop_back(); return true;
+    }
+    ErrFrame* topErr() { return errStack_.empty() ? nullptr : &errStack_.back(); }
+    
+    // Error handling support
+    void setErrorHandler(uint16_t handlerLine) {
+        if (errStack_.empty()) {
+            ErrFrame frame{};
+            frame.errorHandlerLine = handlerLine;
+            frame.trapEnabled = true;
+            errStack_.push_back(frame);
+        } else {
+            errStack_.back().errorHandlerLine = handlerLine;
+            errStack_.back().trapEnabled = true;
+        }
+    }
+    
+    void disableErrorHandler() {
+        if (!errStack_.empty()) {
+            errStack_.back().trapEnabled = false;
+        }
+    }
+    
+    bool hasErrorHandler() const {
+        return !errStack_.empty() && errStack_.back().trapEnabled;
+    }
+    
+    uint16_t getErrorHandlerLine() const {
+        return (!errStack_.empty() && errStack_.back().trapEnabled) ? 
+               errStack_.back().errorHandlerLine : 0;
     }
 
     // Collect string roots that may be held by frames (if any string Values exist in frames).

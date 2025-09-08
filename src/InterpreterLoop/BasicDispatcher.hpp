@@ -19,6 +19,7 @@
 #include "../Runtime/Value.hpp"
 #include "../Runtime/RuntimeStack.hpp"
 #include "../Runtime/ArrayManager.hpp"
+#include "../Runtime/EventTraps.hpp"
 #include "../NumericEngine/NumericEngine.hpp"
 
 // A dispatcher for a subset of BASIC statements to exercise the loop.
@@ -36,7 +37,7 @@ public:
     using PrintCallback = std::function<void(const std::string&)>;
     
     BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr)
-        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), printCallback(printCb) {
+        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), printCallback(printCb) {
         // Wire up cross-references
         vars.setStringHeap(&strHeap);
         vars.setArrayManager(&arrayManager);
@@ -112,6 +113,9 @@ public:
     // Expose environment for inspection in tests
     expr::Env& environment() { return env; }
 
+    // Access to event trap system
+    gwbasic::EventTrapSystem* getEventTrapSystem() { return &eventTraps; }
+
 private:
     std::shared_ptr<Tokenizer> tok;
     std::shared_ptr<ProgramStore> prog;
@@ -123,6 +127,7 @@ private:
     gwbasic::StringHeap strHeap;
     gwbasic::ArrayManager arrayManager;
     gwbasic::RuntimeStack runtimeStack;
+    gwbasic::EventTrapSystem eventTraps;
     expr::Env env;
     PrintCallback printCallback;
     uint16_t currentLine = 0; // Current line number being executed
@@ -228,6 +233,10 @@ private:
     if (name == "ON") return doON(b, pos);
     if (name == "LOAD") return doLOAD(b, pos);
     if (name == "SAVE") return doSAVE(b, pos);
+    if (name == "ERROR") return doERROR(b, pos);
+    if (name == "RESUME") return doRESUME(b, pos);
+    if (name == "KEY") return doKEY(b, pos);
+    if (name == "TIMER") return doTIMER(b, pos);
     if (name == "END" || name == "STOP") return 0xFFFF; // sentinel for caller to halt
         // Unhandled: fallthrough no-op
         return 0;
@@ -354,9 +363,13 @@ private:
                     // Numeric value - use numeric patterns in format
                     NumericEngine numEngine;
                     NumericValue numVal;
-                    if constexpr (std::is_same_v<T, expr::Int16>) numVal = Int16{x.v};
-                    else if constexpr (std::is_same_v<T, expr::Single>) numVal = Single{x.v};
-                    else if constexpr (std::is_same_v<T, expr::Double>) numVal = Double{x.v};
+                    if constexpr (std::is_same_v<T, expr::Int16>) {
+                        numVal = Int16{x.v};
+                    } else if constexpr (std::is_same_v<T, expr::Single>) {
+                        numVal = Single{x.v};
+                    } else if constexpr (std::is_same_v<T, expr::Double>) {
+                        numVal = Double{x.v};
+                    }
                     
                     formattedValue = numEngine.printUsing(formatString, numVal);
                 }
@@ -1037,6 +1050,178 @@ private:
     uint16_t doON(const std::vector<uint8_t>& b, size_t& pos) {
         skipSpaces(b, pos);
         
+        // Check for event trap syntax first: ON ERROR, ON KEY, ON TIMER, etc.
+        if (!atEnd(b, pos)) {
+            auto savePos = pos;
+            
+            // Try to parse event type keyword
+            std::string eventKeyword;
+            uint8_t t = b[pos];
+            
+            if (t >= 0x80) {
+                eventKeyword = tok ? tok->getTokenName(t) : std::string{};
+            } else {
+                // Try ASCII
+                while (!atEnd(b, pos) && std::isalpha(b[pos])) {
+                    eventKeyword.push_back(static_cast<char>(std::toupper(b[pos++])));
+                }
+            }
+            
+            // Handle event trap statements
+            if (eventKeyword == "ERROR") {
+                // ON ERROR GOTO line
+                if (t >= 0x80) ++pos; // consume token
+                skipSpaces(b, pos);
+                
+                // Expect GOTO
+                bool hasGoto = false;
+                if (!atEnd(b, pos)) {
+                    uint8_t t2 = b[pos];
+                    if (t2 >= 0x80) {
+                        std::string name = tok ? tok->getTokenName(t2) : std::string{};
+                        if (name == "GOTO") { ++pos; hasGoto = true; }
+                    } else {
+                        // Try ASCII "GOTO"
+                        auto save = pos;
+                        std::string gotoWord;
+                        for (int i = 0; i < 4 && !atEnd(b, pos); ++i) {
+                            gotoWord.push_back(static_cast<char>(std::toupper(b[pos++])));
+                        }
+                        if (gotoWord == "GOTO") hasGoto = true; else pos = save;
+                    }
+                }
+                
+                if (!hasGoto) {
+                    throw expr::BasicError(2, "Expected GOTO after ON ERROR", pos);
+                }
+                
+                skipSpaces(b, pos);
+                uint16_t handlerLine = readLineNumber(b, pos);
+                
+                // Set error trap
+                eventTraps.setErrorTrap(handlerLine);
+                runtimeStack.setErrorHandler(handlerLine);
+                
+                return 0;
+                
+            } else if (eventKeyword == "KEY") {
+                // ON KEY(n) GOTO line
+                if (t >= 0x80) ++pos; // consume token
+                skipSpaces(b, pos);
+                
+                // Parse KEY(n) or just KEY
+                uint8_t keyIndex = 0;
+                if (!atEnd(b, pos) && (b[pos] == '(' || b[pos] == 0xf3)) {
+                    // KEY(n) syntax
+                    if (b[pos] == '(') ++pos;
+                    else if (b[pos] == 0xf3) ++pos; // tokenized (
+                    
+                    skipSpaces(b, pos);
+                    auto res = ev.evaluate(b, pos, env);
+                    pos = res.nextPos;
+                    keyIndex = static_cast<uint8_t>(expr::ExpressionEvaluator::toInt16(res.value));
+                    
+                    skipSpaces(b, pos);
+                    if (!atEnd(b, pos) && (b[pos] == ')' || b[pos] == 0xf4)) {
+                        ++pos; // consume closing )
+                    }
+                }
+                
+                skipSpaces(b, pos);
+                
+                // Expect GOTO
+                bool hasGoto = false;
+                if (!atEnd(b, pos)) {
+                    uint8_t t2 = b[pos];
+                    if (t2 >= 0x80) {
+                        std::string name = tok ? tok->getTokenName(t2) : std::string{};
+                        if (name == "GOTO") { ++pos; hasGoto = true; }
+                    } else {
+                        // Try ASCII "GOTO"
+                        auto save = pos;
+                        std::string gotoWord;
+                        for (int i = 0; i < 4 && !atEnd(b, pos); ++i) {
+                            gotoWord.push_back(static_cast<char>(std::toupper(b[pos++])));
+                        }
+                        if (gotoWord == "GOTO") hasGoto = true; else pos = save;
+                    }
+                }
+                
+                if (!hasGoto) {
+                    throw expr::BasicError(2, "Expected GOTO after ON KEY", pos);
+                }
+                
+                skipSpaces(b, pos);
+                uint16_t handlerLine = readLineNumber(b, pos);
+                
+                // Set key trap
+                if (keyIndex > 0) {
+                    eventTraps.setKeyTrap(keyIndex, handlerLine);
+                }
+                
+                return 0;
+                
+            } else if (eventKeyword == "TIMER") {
+                // ON TIMER(interval) GOTO line
+                if (t >= 0x80) ++pos; // consume token
+                skipSpaces(b, pos);
+                
+                // Parse TIMER(interval)
+                uint16_t interval = 1; // default 1 second
+                if (!atEnd(b, pos) && (b[pos] == '(' || b[pos] == 0xf3)) {
+                    // TIMER(interval) syntax
+                    if (b[pos] == '(') ++pos;
+                    else if (b[pos] == 0xf3) ++pos; // tokenized (
+                    
+                    skipSpaces(b, pos);
+                    auto res = ev.evaluate(b, pos, env);
+                    pos = res.nextPos;
+                    interval = static_cast<uint16_t>(expr::ExpressionEvaluator::toInt16(res.value));
+                    
+                    skipSpaces(b, pos);
+                    if (!atEnd(b, pos) && (b[pos] == ')' || b[pos] == 0xf4)) {
+                        ++pos; // consume closing )
+                    }
+                }
+                
+                skipSpaces(b, pos);
+                
+                // Expect GOTO
+                bool hasGoto = false;
+                if (!atEnd(b, pos)) {
+                    uint8_t t2 = b[pos];
+                    if (t2 >= 0x80) {
+                        std::string name = tok ? tok->getTokenName(t2) : std::string{};
+                        if (name == "GOTO") { ++pos; hasGoto = true; }
+                    } else {
+                        // Try ASCII "GOTO"
+                        auto save = pos;
+                        std::string gotoWord;
+                        for (int i = 0; i < 4 && !atEnd(b, pos); ++i) {
+                            gotoWord.push_back(static_cast<char>(std::toupper(b[pos++])));
+                        }
+                        if (gotoWord == "GOTO") hasGoto = true; else pos = save;
+                    }
+                }
+                
+                if (!hasGoto) {
+                    throw expr::BasicError(2, "Expected GOTO after ON TIMER", pos);
+                }
+                
+                skipSpaces(b, pos);
+                uint16_t handlerLine = readLineNumber(b, pos);
+                
+                // Set timer trap
+                eventTraps.setTimerTrap(handlerLine, interval);
+                
+                return 0;
+            }
+            
+            // Not an event trap - restore position and handle as computed GOTO/GOSUB
+            pos = savePos;
+        }
+        
+        // Handle traditional ON expression GOTO/GOSUB syntax
         // Evaluate the expression to get the index
         auto res = ev.evaluate(b, pos, env);
         pos = res.nextPos;
@@ -1283,6 +1468,186 @@ private:
             
             // End of DIM statement
             break;
+        }
+        
+        return 0;
+    }
+    
+    // Error handling statements
+    uint16_t doERROR(const std::vector<uint8_t>& b, size_t& pos) {
+        // ERROR <errorcode> - Simulate an error
+        skipSpaces(b, pos);
+        
+        auto res = ev.evaluate(b, pos, env);
+        pos = res.nextPos;
+        
+        uint16_t errorCode = static_cast<uint16_t>(expr::ExpressionEvaluator::toInt16(res.value));
+        
+        // Trigger error trap if enabled
+        if (runtimeStack.hasErrorHandler()) {
+            // Set up error frame
+            gwbasic::ErrFrame frame{};
+            frame.errCode = errorCode;
+            frame.resumeLine = currentLine;
+            frame.resumeTextPtr = 0;
+            runtimeStack.pushErr(frame);
+            
+            // Jump to error handler
+            return runtimeStack.getErrorHandlerLine();
+        } else {
+            // No error handler - should cause program termination
+            throw expr::BasicError(errorCode, "Error", pos);
+        }
+    }
+    
+    uint16_t doRESUME(const std::vector<uint8_t>& b, size_t& pos) {
+        // RESUME [NEXT | <line>]
+        skipSpaces(b, pos);
+        
+        gwbasic::ErrFrame frame{};
+        if (!runtimeStack.popErr(frame)) {
+            throw expr::BasicError(20, "RESUME without error", pos);
+        }
+        
+        if (atEnd(b, pos) || b[pos] == ':' || b[pos] == 0x00) {
+            // RESUME - go back to line that caused error
+            return frame.resumeLine;
+        }
+        
+        // Check for NEXT keyword
+        if (!atEnd(b, pos)) {
+            uint8_t t = b[pos];
+            if (t >= 0x80) {
+                std::string name = tok ? tok->getTokenName(t) : std::string{};
+                if (name == "NEXT") {
+                    ++pos;
+                    // RESUME NEXT - go to next line after error
+                    if (prog) {
+                        auto nextIt = prog->getNextLine(frame.resumeLine);
+                        if (nextIt.isValid()) {
+                            return nextIt->lineNumber;
+                        }
+                    }
+                    return 0; // End of program
+                }
+            } else {
+                // Try ASCII "NEXT"
+                auto save = pos;
+                std::string next;
+                for (int i = 0; i < 4 && !atEnd(b, pos); ++i) {
+                    next.push_back(static_cast<char>(std::toupper(b[pos++])));
+                }
+                if (next == "NEXT") {
+                    // RESUME NEXT
+                    if (prog) {
+                        auto nextIt = prog->getNextLine(frame.resumeLine);
+                        if (nextIt.isValid()) {
+                            return nextIt->lineNumber;
+                        }
+                    }
+                    return 0;
+                } else {
+                    pos = save;
+                }
+            }
+        }
+        
+        // RESUME <line> - go to specific line
+        uint16_t targetLine = readLineNumber(b, pos);
+        return targetLine;
+    }
+    
+    // Event trap control statements  
+    uint16_t doKEY(const std::vector<uint8_t>& b, size_t& pos) {
+        // KEY(n) ON/OFF/STOP or KEY ON/OFF
+        skipSpaces(b, pos);
+        
+        // Check for KEY(n) syntax
+        uint8_t keyIndex = 0;
+        if (!atEnd(b, pos) && (b[pos] == '(' || b[pos] == 0xf3)) {
+            // KEY(n) syntax - parse key index
+            if (b[pos] == '(') ++pos;
+            else if (b[pos] == 0xf3) ++pos; // tokenized (
+            
+            skipSpaces(b, pos);
+            auto res = ev.evaluate(b, pos, env);
+            pos = res.nextPos;
+            keyIndex = static_cast<uint8_t>(expr::ExpressionEvaluator::toInt16(res.value));
+            
+            skipSpaces(b, pos);
+            if (!atEnd(b, pos) && (b[pos] == ')' || b[pos] == 0xf4)) {
+                ++pos; // consume closing )
+            }
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Parse ON/OFF/STOP
+        if (!atEnd(b, pos)) {
+            uint8_t t = b[pos];
+            std::string command;
+            
+            if (t >= 0x80) {
+                command = tok ? tok->getTokenName(t) : std::string{};
+                ++pos;
+            } else {
+                // Try ASCII
+                auto save = pos;
+                while (!atEnd(b, pos) && std::isalpha(b[pos])) {
+                    command.push_back(static_cast<char>(std::toupper(b[pos++])));
+                }
+                if (command.empty()) pos = save;
+            }
+            
+            if (command == "ON") {
+                if (keyIndex > 0) {
+                    eventTraps.enableTrap(gwbasic::EventType::Key, keyIndex);
+                } else {
+                    eventTraps.enableAllTraps();
+                }
+            } else if (command == "OFF") {
+                if (keyIndex > 0) {
+                    eventTraps.disableTrap(gwbasic::EventType::Key, keyIndex);
+                } else {
+                    eventTraps.disableAllTraps();
+                }
+            } else if (command == "STOP") {
+                if (keyIndex > 0) {
+                    eventTraps.suspendTrap(gwbasic::EventType::Key, keyIndex);
+                } else {
+                    eventTraps.suspendAllTraps();
+                }
+            }
+        }
+        
+        return 0;
+    }
+    
+    uint16_t doTIMER(const std::vector<uint8_t>& b, size_t& pos) {
+        // TIMER ON/OFF/STOP
+        skipSpaces(b, pos);
+        
+        if (!atEnd(b, pos)) {
+            uint8_t t = b[pos];
+            std::string command;
+            
+            if (t >= 0x80) {
+                command = tok ? tok->getTokenName(t) : std::string{};
+                ++pos;
+            } else {
+                // Try ASCII
+                while (!atEnd(b, pos) && std::isalpha(b[pos])) {
+                    command.push_back(static_cast<char>(std::toupper(b[pos++])));
+                }
+            }
+            
+            if (command == "ON") {
+                eventTraps.enableTrap(gwbasic::EventType::Timer);
+            } else if (command == "OFF") {
+                eventTraps.disableTrap(gwbasic::EventType::Timer);
+            } else if (command == "STOP") {
+                eventTraps.suspendTrap(gwbasic::EventType::Timer);
+            }
         }
         
         return 0;
