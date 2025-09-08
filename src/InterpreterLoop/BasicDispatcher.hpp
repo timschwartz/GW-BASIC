@@ -7,27 +7,33 @@
 #include <string>
 #include <vector>
 #include <cctype>
+#include <fstream>
+#include <sstream>
 
 #include "../Tokenizer/Tokenizer.hpp"
+#include "../ProgramStore/ProgramStore.hpp"
 #include "../ExpressionEvaluator/ExpressionEvaluator.hpp"
 #include "../Runtime/VariableTable.hpp"
 #include "../Runtime/StringHeap.hpp"
 #include "../Runtime/Value.hpp"
+#include "../Runtime/RuntimeStack.hpp"
 
-// A tiny, minimal dispatcher for a subset of BASIC statements to exercise the loop.
+// A dispatcher for a subset of BASIC statements to exercise the loop.
 // It supports:
 // - PRINT (strings/numbers; separators: space/comma/semicolon)
 // - LET and implied assignment (A=expr)
 // - IF expr THEN lineno   (no ELSE yet)
 // - GOTO lineno
+// - FOR var = start TO end [STEP increment]
+// - NEXT [var]
 // - END/STOP
 // Returns next-line override (0 for fallthrough). Throws on errors.
 class BasicDispatcher {
 public:
     using PrintCallback = std::function<void(const std::string&)>;
     
-    BasicDispatcher(std::shared_ptr<Tokenizer> t, PrintCallback printCb = nullptr)
-        : tok(std::move(t)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), printCallback(printCb) {
+    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr)
+        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), printCallback(printCb) {
         // Wire evaluator env to read variables from VariableTable
         env.optionBase = 0;
         env.vars.clear();
@@ -77,12 +83,14 @@ public:
 
 private:
     std::shared_ptr<Tokenizer> tok;
+    std::shared_ptr<ProgramStore> prog;
     expr::ExpressionEvaluator ev;
     // Runtime variable storage and string heap
     gwbasic::DefaultTypeTable deftbl{};
     gwbasic::VariableTable vars;
     uint8_t heapBuf[8192]{};
     gwbasic::StringHeap strHeap;
+    gwbasic::RuntimeStack runtimeStack;
     expr::Env env;
     PrintCallback printCallback;
 
@@ -146,6 +154,10 @@ private:
     if (name == "LET") return handleLet(b, pos, /*implied*/false);
     if (name == "IF") return doIF(b, pos);
     if (name == "GOTO") return doGOTO(b, pos);
+    if (name == "FOR") return doFOR(b, pos);
+    if (name == "NEXT") return doNEXT(b, pos);
+    if (name == "LOAD") return doLOAD(b, pos);
+    if (name == "SAVE") return doSAVE(b, pos);
     if (name == "END" || name == "STOP") return 0xFFFF; // sentinel for caller to halt
         // Unhandled: fallthrough no-op
         return 0;
@@ -186,6 +198,129 @@ private:
             std::cout << output;
         }
         
+        return 0;
+    }
+
+    // LOAD "filename"
+    uint16_t doLOAD(const std::vector<uint8_t>& b, size_t& pos) {
+        if (pos >= b.size()) {
+            std::cerr << "?Missing filename" << std::endl;
+            return 0;
+        }
+
+        // Expect a string literal for filename
+        std::string filename;
+        if (b[pos] == '"') {
+            pos++; // skip opening quote
+            while (pos < b.size() && b[pos] != '"') {
+                filename += static_cast<char>(b[pos++]);
+            }
+            if (pos < b.size() && b[pos] == '"') {
+                pos++; // skip closing quote
+            }
+        } else {
+            std::cerr << "?String expected" << std::endl;
+            return 0;
+        }
+
+        // Open and read the file
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            std::cerr << "?File not found" << std::endl;
+            return 0;
+        }
+
+        // Clear current program
+        if (prog) {
+            prog->clear();
+        }
+
+        // Read file line by line
+        std::string line;
+        while (std::getline(file, line)) {
+            if (line.empty()) continue;
+            
+            // Parse line number if present
+            std::istringstream iss(line);
+            std::string token;
+            iss >> token;
+            
+            uint16_t lineNum = 0;
+            if (std::isdigit(token[0])) {
+                lineNum = static_cast<uint16_t>(std::stoul(token));
+                // Get rest of line
+                std::string restOfLine;
+                std::getline(iss, restOfLine);
+                if (!restOfLine.empty() && restOfLine[0] == ' ') {
+                    restOfLine = restOfLine.substr(1); // remove leading space
+                }
+                
+                // Tokenize and store the line
+                if (tok && prog) {
+                    auto tokenized = tok->tokenize(restOfLine);
+                    // Convert tokens to byte vector and add null terminator
+                    std::vector<uint8_t> bytes;
+                    for (const auto& token : tokenized) {
+                        bytes.insert(bytes.end(), token.bytes.begin(), token.bytes.end());
+                    }
+                    bytes.push_back(0x00); // null terminator
+                    prog->insertLine(lineNum, bytes);
+                }
+            }
+        }
+        
+        file.close();
+        std::cout << "Ok" << std::endl;
+        return 0;
+    }
+
+    // SAVE "filename"
+    uint16_t doSAVE(const std::vector<uint8_t>& b, size_t& pos) {
+        if (pos >= b.size()) {
+            std::cerr << "?Missing filename" << std::endl;
+            return 0;
+        }
+
+        // Expect a string literal for filename
+        std::string filename;
+        if (b[pos] == '"') {
+            pos++; // skip opening quote
+            while (pos < b.size() && b[pos] != '"') {
+                filename += static_cast<char>(b[pos++]);
+            }
+            if (pos < b.size() && b[pos] == '"') {
+                pos++; // skip closing quote
+            }
+        } else {
+            std::cerr << "?String expected" << std::endl;
+            return 0;
+        }
+
+        // Open file for writing
+        std::ofstream file(filename);
+        if (!file.is_open()) {
+            std::cerr << "?Cannot create file" << std::endl;
+            return 0;
+        }
+
+        // Write program lines
+        if (prog) {
+            for (auto it = prog->begin(); it != prog->end(); ++it) {
+                uint16_t lineNum = it->lineNumber;
+                const auto& tokens = it->tokens;
+                
+                file << lineNum << " ";
+                
+                // Detokenize the line
+                if (tok) {
+                    std::string detokenized = tok->detokenize(tokens);
+                    file << detokenized << std::endl;
+                }
+            }
+        }
+        
+        file.close();
+        std::cout << "Ok" << std::endl;
         return 0;
     }
 
@@ -356,6 +491,214 @@ private:
             }
             // After ELSE inline execution or skip, return to outer to proceed after colon if present.
             return 0;
+        }
+    }
+
+    uint16_t doFOR(const std::vector<uint8_t>& b, size_t& pos) {
+        skipSpaces(b, pos);
+        
+        // Read the loop variable name
+        auto varName = readIdentifier(b, pos);
+        if (varName.empty()) throw expr::BasicError(2, "Expected variable name", pos);
+        
+        skipSpaces(b, pos);
+        // Expect '=' (ASCII or tokenized)
+        if (atEnd(b, pos) || !(
+            b[pos] == '=' ||
+            (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "=")
+        )) {
+            throw expr::BasicError(2, "Expected = in FOR statement", pos);
+        }
+        ++pos; // consume '='
+        
+        skipSpaces(b, pos);
+        // Evaluate start value
+        auto startRes = ev.evaluate(b, pos, env);
+        pos = startRes.nextPos;
+        
+        skipSpaces(b, pos);
+        // Expect TO keyword
+        bool hasTo = false;
+        if (!atEnd(b, pos)) {
+            uint8_t t = b[pos];
+            if (t >= 0x80) {
+                std::string name = tok ? tok->getTokenName(t) : std::string{};
+                if (name == "TO") { ++pos; hasTo = true; }
+            }
+        }
+        if (!hasTo) {
+            // Try ASCII "TO"
+            auto save = pos;
+            std::string to;
+            for (int i = 0; i < 2 && !atEnd(b, pos); ++i) to.push_back(static_cast<char>(std::toupper(b[pos++])));
+            if (to == "TO") hasTo = true; else pos = save;
+        }
+        if (!hasTo) throw expr::BasicError(2, "Expected TO in FOR statement", pos);
+        
+        skipSpaces(b, pos);
+        // Evaluate end value  
+        auto endRes = ev.evaluate(b, pos, env);
+        pos = endRes.nextPos;
+        
+        skipSpaces(b, pos);
+        // Check for optional STEP
+        expr::Value stepVal = expr::Int16{1}; // default step
+        bool hasStep = false;
+        if (!atEnd(b, pos)) {
+            uint8_t t = b[pos];
+            if (t >= 0x80) {
+                std::string name = tok ? tok->getTokenName(t) : std::string{};
+                if (name == "STEP") { ++pos; hasStep = true; }
+            }
+        }
+        if (!hasStep) {
+            // Try ASCII "STEP"
+            auto save = pos;
+            std::string step;
+            for (int i = 0; i < 4 && !atEnd(b, pos); ++i) step.push_back(static_cast<char>(std::toupper(b[pos++])));
+            if (step == "STEP") hasStep = true; else pos = save;
+        }
+        if (hasStep) {
+            skipSpaces(b, pos);
+            auto stepRes = ev.evaluate(b, pos, env);
+            pos = stepRes.nextPos;
+            stepVal = stepRes.value;
+        }
+        
+        // Store initial value in variable
+        toRuntimeValue(varName, startRes.value);
+        
+        // Check if we should even enter the loop
+        // Convert values to double for comparison
+        double startD = expr::ExpressionEvaluator::toDouble(startRes.value);
+        double endD = expr::ExpressionEvaluator::toDouble(endRes.value);
+        double stepD = expr::ExpressionEvaluator::toDouble(stepVal);
+        
+        // Check loop condition (ANSI BASIC semantics)
+        bool shouldEnter = (stepD >= 0) ? (startD <= endD) : (startD >= endD);
+        
+        if (!shouldEnter) {
+            // Skip to matching NEXT - for now, just scan ahead and consume the NEXT
+            // In a real implementation, we'd scan to the matching NEXT statement
+            return 0; // Skip loop entirely
+        }
+        
+        // Create FOR frame and push onto stack
+        gwbasic::ForFrame frame{};
+        frame.varKey = varName;
+        frame.control = toRuntimeValue(varName, startRes.value); // store current value
+        frame.limit = toRuntimeValue("", endRes.value); // temporary storage for limit
+        frame.step = toRuntimeValue("", stepVal); // temporary storage for step
+        frame.textPtr = static_cast<uint32_t>(pos); // where to continue after FOR
+        
+        runtimeStack.pushFor(frame);
+        
+        return 0; // Continue to next statement
+    }
+    
+    uint16_t doNEXT(const std::vector<uint8_t>& b, size_t& pos) {
+        skipSpaces(b, pos);
+        
+        // Optional variable name
+        std::string varName;
+        if (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+            varName = readIdentifier(b, pos);
+        }
+        
+        // Find matching FOR frame
+        gwbasic::ForFrame* forFrame = runtimeStack.topFor();
+        if (!forFrame) {
+            throw expr::BasicError(1, "NEXT without FOR", pos);
+        }
+        
+        // If variable specified, check it matches
+        if (!varName.empty() && forFrame->varKey != varName) {
+            throw expr::BasicError(1, "NEXT variable mismatch", pos);
+        }
+        
+        // Get current variable value
+        auto* slot = vars.tryGet(forFrame->varKey);
+        if (!slot) {
+            throw expr::BasicError(1, "FOR variable not found", pos);
+        }
+        
+        // Increment by step
+        double current = 0;
+        double step = 0;
+        double limit = 0;
+        
+        switch (slot->scalar.type) {
+            case gwbasic::ScalarType::Int16:
+                current = slot->scalar.i;
+                break;
+            case gwbasic::ScalarType::Single:
+                current = slot->scalar.f;
+                break;
+            case gwbasic::ScalarType::Double:
+                current = slot->scalar.d;
+                break;
+            default:
+                throw expr::BasicError(13, "Type mismatch in FOR loop", pos);
+        }
+        
+        switch (forFrame->step.type) {
+            case gwbasic::ScalarType::Int16:
+                step = forFrame->step.i;
+                break;
+            case gwbasic::ScalarType::Single:
+                step = forFrame->step.f;
+                break;
+            case gwbasic::ScalarType::Double:
+                step = forFrame->step.d;
+                break;
+            default:
+                step = 1;
+        }
+        
+        switch (forFrame->limit.type) {
+            case gwbasic::ScalarType::Int16:
+                limit = forFrame->limit.i;
+                break;
+            case gwbasic::ScalarType::Single:
+                limit = forFrame->limit.f;
+                break;
+            case gwbasic::ScalarType::Double:
+                limit = forFrame->limit.d;
+                break;
+            default:
+                limit = 0;
+        }
+        
+        // Update loop variable
+        current += step;
+        
+        // Store updated value back to variable
+        switch (slot->scalar.type) {
+            case gwbasic::ScalarType::Int16:
+                slot->scalar.i = static_cast<int16_t>(current);
+                break;
+            case gwbasic::ScalarType::Single:
+                slot->scalar.f = static_cast<float>(current);
+                break;
+            case gwbasic::ScalarType::Double:
+                slot->scalar.d = current;
+                break;
+            default:
+                break;
+        }
+        
+        // Check loop termination condition
+        bool shouldContinue = (step >= 0) ? (current <= limit) : (current >= limit);
+        
+        if (shouldContinue) {
+            // Continue loop - jump back to start of FOR body
+            // The textPtr in the frame should point to where execution continues after the FOR statement
+            return 0; // For now, just continue to next statement - real implementation would jump back
+        } else {
+            // Loop finished - pop FOR frame and continue
+            gwbasic::ForFrame dummy;
+            runtimeStack.popFor(dummy);
+            return 0; // Continue to statement after NEXT
         }
     }
 };

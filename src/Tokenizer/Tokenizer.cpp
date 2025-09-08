@@ -416,9 +416,13 @@ std::string Tokenizer::detokenize(const std::vector<uint8_t>& tokens) {
             // Single-byte token
             auto it = tokenNames.find(token);
             if (it != tokenNames.end()) {
+                // Add space before token if needed
+                if (!result.str().empty() && result.str().back() != ' ' && 
+                    result.str().back() != '\n') {
+                    result << " ";
+                }
                 result << it->second;
-                if (token != TOKEN_REM && !result.str().empty() && 
-                    result.str().back() != ' ') {
+                if (token != TOKEN_REM) {
                     result << " ";
                 }
             } else {
@@ -466,9 +470,26 @@ std::string Tokenizer::detokenize(const std::vector<uint8_t>& tokens) {
                 i++;
             }
         } else {
-            // Regular character
-            result << static_cast<char>(token);
-            i++;
+            // Check if it's an operator token
+            auto it = tokenNames.find(token);
+            if (it != tokenNames.end()) {
+                // This is an operator or other named token
+                // Add space before operator if needed
+                if (!result.str().empty() && result.str().back() != ' ' && 
+                    result.str().back() != '\n') {
+                    result << " ";
+                }
+                result << it->second;
+                // Add space after operator if needed (look ahead to see if next token exists)
+                if (i + 1 < tokens.size() && tokens[i + 1] != 0x00) {
+                    result << " ";
+                }
+                i++;
+            } else {
+                // Regular character
+                result << static_cast<char>(token);
+                i++;
+            }
         }
     }
     

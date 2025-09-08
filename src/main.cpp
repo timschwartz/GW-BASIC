@@ -83,7 +83,7 @@ public:
         interpreter = std::make_shared<InterpreterLoop>(programStore, tokenizer);
         
         // Create dispatcher with print callback to redirect output to SDL window
-        dispatcher = std::make_unique<BasicDispatcher>(tokenizer, 
+        dispatcher = std::make_unique<BasicDispatcher>(tokenizer, programStore,
             [this](const std::string& text) { print(text); });
         
         // Set up interpreter with our dispatcher
