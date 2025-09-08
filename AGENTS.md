@@ -11,3 +11,5 @@ Do not omit "this" when referencing member variables.
 Use "#pragma once" instead of header guards.
 
 Use catch2 for tests.
+
+The original 6502 assembly language source code is in /asm.
