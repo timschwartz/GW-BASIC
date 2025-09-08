@@ -9,6 +9,7 @@
 #include <cctype>
 #include <fstream>
 #include <sstream>
+#include <iomanip>
 
 #include "../Tokenizer/Tokenizer.hpp"
 #include "../ProgramStore/ProgramStore.hpp"
@@ -54,6 +55,13 @@ public:
         size_t pos = 0;
         currentLine = currentLineNumber; // store for use by statement handlers
         expr::Env envRef = env; // local view for eval; share vars by reference via pointer below if needed
+        
+        std::cerr << "BasicDispatcher: Processing " << tokens.size() << " tokens: ";
+        for (size_t i = 0; i < std::min(tokens.size(), size_t(20)); i++) {
+            std::cerr << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(tokens[i]) << " ";
+        }
+        std::cerr << std::dec << std::endl;
+        
         // peek first significant byte
         skipSpaces(tokens, pos);
         // Some sources may include a leading tokenized line-number (0x0D LL HH); skip it defensively
@@ -69,10 +77,12 @@ public:
             if (atEnd(tokens, pos)) break;
             if (tokens[pos] == ':') { ++pos; continue; }
             uint8_t b = tokens[pos];
+            std::cerr << "About to dispatch token 0x" << std::hex << static_cast<int>(b) << std::dec << " at pos " << pos << std::endl;
             uint16_t r = 0;
             if (b >= 0x80) {
                 r = handleStatement(tokens, pos);
             } else {
+                std::cerr << "Trying handleLet (implied assignment)" << std::endl;
                 r = handleLet(tokens, pos, /*implied*/true);
             }
             if (r != 0) return r; // jump or termination sentinel
@@ -156,6 +166,9 @@ private:
     uint8_t t = b[pos++]; // consume token
     // Map through Tokenizer public name lookup
     std::string name = tok ? tok->getTokenName(t) : std::string{};
+    
+    std::cerr << "handleStatement: token 0x" << std::hex << static_cast<int>(t) << std::dec << " -> '" << name << "'" << std::endl;
+    
     if (name == "PRINT") return doPRINT(b, pos);
     if (name == "LET") return handleLet(b, pos, /*implied*/false);
     if (name == "IF") return doIF(b, pos);
@@ -164,6 +177,7 @@ private:
     if (name == "NEXT") return doNEXT(b, pos);
     if (name == "GOSUB") return doGOSUB(b, pos);
     if (name == "RETURN") return doRETURN(b, pos);
+    if (name == "ON") return doON(b, pos);
     if (name == "LOAD") return doLOAD(b, pos);
     if (name == "SAVE") return doSAVE(b, pos);
     if (name == "END" || name == "STOP") return 0xFFFF; // sentinel for caller to halt
@@ -754,5 +768,135 @@ private:
         
         // If we can't find the next line, just continue normally
         return 0;
+    }
+    
+    uint16_t doON(const std::vector<uint8_t>& b, size_t& pos) {
+        skipSpaces(b, pos);
+        
+        // Debug: print the bytes we're about to process
+        std::cerr << "doON: Processing bytes from pos " << pos << ": ";
+        for (size_t i = pos; i < std::min(pos + 20, b.size()); i++) {
+            std::cerr << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b[i]) << " ";
+        }
+        std::cerr << std::dec << std::endl;
+        
+        // Evaluate the expression to get the index
+        auto res = ev.evaluate(b, pos, env);
+        pos = res.nextPos;
+        
+        // Convert to integer index (1-based)
+        int16_t index = expr::ExpressionEvaluator::toInt16(res.value);
+        
+        std::cerr << "doON: Evaluated index = " << index << ", new pos = " << pos << std::endl;
+        std::cerr << "doON: Next bytes: ";
+        for (size_t i = pos; i < std::min(pos + 10, b.size()); i++) {
+            std::cerr << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b[i]) << " ";
+        }
+        std::cerr << std::dec << std::endl;
+        
+        skipSpaces(b, pos);
+        
+        // Check for GOTO or GOSUB keyword
+        bool isGosub = false;
+        if (!atEnd(b, pos)) {
+            uint8_t t = b[pos];
+            std::cerr << "doON: Checking token at pos " << pos << ": 0x" << std::hex << static_cast<int>(t) << std::dec;
+            if (t >= 0x80 && tok) {
+                std::cerr << " (" << tok->getTokenName(t) << ")";
+            }
+            std::cerr << std::endl;
+            
+            if (t >= 0x80) {
+                std::string name = tok ? tok->getTokenName(t) : std::string{};
+                if (name == "GOTO") {
+                    ++pos;
+                } else if (name == "GOSUB") {
+                    ++pos;
+                    isGosub = true;
+                } else {
+                    throw expr::BasicError(2, "Expected GOTO or GOSUB in ON statement", pos);
+                }
+            } else {
+                // Try ASCII
+                auto save = pos;
+                std::string keyword;
+                while (!atEnd(b, pos) && std::isalpha(b[pos])) {
+                    keyword.push_back(static_cast<char>(std::toupper(b[pos++])));
+                }
+                if (keyword == "GOTO") {
+                    // keep pos at current position
+                } else if (keyword == "GOSUB") {
+                    isGosub = true;
+                } else {
+                    pos = save;
+                    throw expr::BasicError(2, "Expected GOTO or GOSUB in ON statement", pos);
+                }
+            }
+        } else {
+            throw expr::BasicError(2, "Expected GOTO or GOSUB in ON statement", pos);
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Parse line number list - look for sequence of integer tokens
+        std::vector<uint16_t> lineNumbers;
+        
+        while (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+            skipSpaces(b, pos);
+            if (atEnd(b, pos) || b[pos] == ':') break;
+            
+            // Check if we have an integer token (0x11) or ASCII digits
+            if (pos + 2 < b.size() && b[pos] == 0x11) {
+                // Integer token - read it
+                uint16_t lineNum = static_cast<uint16_t>(b[pos+1]) | (static_cast<uint16_t>(b[pos+2]) << 8);
+                lineNumbers.push_back(lineNum);
+                pos += 3;
+            } else if (pos < b.size() && b[pos] >= '0' && b[pos] <= '9') {
+                // ASCII digits
+                uint32_t v = 0;
+                while (pos < b.size() && b[pos] >= '0' && b[pos] <= '9') { 
+                    v = v*10 + (b[pos]-'0'); 
+                    ++pos; 
+                }
+                lineNumbers.push_back(static_cast<uint16_t>(v));
+            } else {
+                // Neither integer token nor ASCII digits - might be comma or end
+                if (b[pos] == ',') {
+                    ++pos; // consume comma and continue
+                    continue;
+                } else {
+                    // End of line number list
+                    break;
+                }
+            }
+            
+            skipSpaces(b, pos);
+            
+            // Optional comma - if present, consume it
+            if (!atEnd(b, pos) && b[pos] == ',') {
+                ++pos; // consume comma
+                continue;
+            }
+            // If no comma, we might be at the end or there might be more integer tokens
+            // Continue the loop to check for more integer tokens
+        }
+        
+        // If index is out of range (0 or negative, or beyond list), do nothing
+        if (index <= 0 || index > static_cast<int16_t>(lineNumbers.size())) {
+            return 0; // No jump
+        }
+        
+        // Get the target line number (1-based indexing)
+        uint16_t targetLine = lineNumbers[static_cast<size_t>(index - 1)];
+        
+        if (isGosub) {
+            // Push GOSUB frame before jumping
+            gwbasic::GosubFrame frame{};
+            frame.returnLine = currentLine;
+            frame.returnTextPtr = 0;
+            runtimeStack.pushGosub(frame);
+        }
+        
+        return targetLine;
     }
 };

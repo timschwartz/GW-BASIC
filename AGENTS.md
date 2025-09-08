@@ -1,3 +1,5 @@
+Read docs/reimplementation_guide.md and docs/architecture_map.md when deciding what to work on.
+
 Always ask for permission before making changes you weren't explicitly asked to make.
 
 Write C++20 compatible code.

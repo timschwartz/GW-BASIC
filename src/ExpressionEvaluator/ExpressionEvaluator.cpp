@@ -114,6 +114,29 @@ std::string ExpressionEvaluator::readIdentifier(const std::vector<uint8_t>& b, s
 ExpressionEvaluator::OpInfo ExpressionEvaluator::peekOperator(const std::vector<uint8_t>& b, size_t pos) const {
     OpInfo none{"", -1, -1, false};
     if (atEnd(b, pos)) return none;
+    
+    uint8_t c = b[pos];
+    
+    // Check for tokenized operators first (if we have a tokenizer)
+    if (c >= 0x80 && tokenizer) {
+        std::string tokenName = tokenizer->getTokenName(c);
+        if (tokenName == ">") return {">", 40, 41, false};
+        if (tokenName == "=") return {"=", 40, 41, false};
+        if (tokenName == "<") return {"<", 40, 41, false};
+        if (tokenName == "+") return {"+", 50, 51, false};
+        if (tokenName == "-") return {"-", 50, 51, false};
+        if (tokenName == "*") return {"*", 60, 61, false};
+        if (tokenName == "/") return {"/", 60, 61, false};
+        if (tokenName == "^") return {"^", 80, 79, true};
+        if (tokenName == "\\") return {"\\", 60, 61, false};
+        if (tokenName == "AND") return {"AND", 30, 31, false};
+        if (tokenName == "OR") return {"OR", 20, 21, false};
+        if (tokenName == "XOR") return {"XOR", 20, 21, false};
+        if (tokenName == "EQV") return {"EQV", 10, 11, false};
+        if (tokenName == "IMP") return {"IMP", 10, 11, false};
+        if (tokenName == "MOD") return {"MOD", 60, 61, false};
+    }
+    
     // Multi-char comparisons first
     if (pos + 1 < b.size()) {
         uint8_t c0 = b[pos], c1 = b[pos + 1];
@@ -122,7 +145,8 @@ ExpressionEvaluator::OpInfo ExpressionEvaluator::peekOperator(const std::vector<
             return {op, 40, 41, false};
         }
     }
-    uint8_t c = b[pos];
+    
+    // ASCII operators
     switch (c) {
         case '^': return {"^", 80, 79, true};
         case '*': return {"*", 60, 61, false};
@@ -199,7 +223,7 @@ Value ExpressionEvaluator::parsePrimary(const std::vector<uint8_t>& b, size_t& p
     Value str;
     if (tryDecodeString(b, pos, str)) return str;
 
-    // Unary operators: +, -, NOT
+    // Unary operators: +, -, NOT (both ASCII and tokenized forms)
     if (t == '+' || t == '-') {
         char op = static_cast<char>(t);
         ++pos; skipSpaces(b, pos);
@@ -209,6 +233,21 @@ Value ExpressionEvaluator::parsePrimary(const std::vector<uint8_t>& b, size_t& p
         // Negation
         if (!isNumeric(rhs)) throw BasicError(13, "Type mismatch", pos);
         return Double{-toDouble(rhs)};
+    }
+    
+    // Tokenized unary operators (using tokenizer to resolve token names)
+    if (t >= 0x80 && tokenizer) {
+        std::string tokenName = tokenizer->getTokenName(t);
+        if (tokenName == "+" || tokenName == "-") {
+            char op = tokenName[0];
+            ++pos; skipSpaces(b, pos);
+            // prefix power lower than '^' to ensure -5^2 == -(5^2)
+            auto rhs = parseExpression(b, pos, env, 60);
+            if (op == '+') return rhs;
+            // Negation
+            if (!isNumeric(rhs)) throw BasicError(13, "Type mismatch", pos);
+            return Double{-toDouble(rhs)};
+        }
     }
     // NOT prefix
     if ((t == 'N' || t == 'n') && pos + 2 < b.size() && (std::toupper(b[pos]) == 'N') && (std::toupper(b[pos+1]) == 'O') && (std::toupper(b[pos+2]) == 'T')) {
@@ -268,9 +307,14 @@ Value ExpressionEvaluator::parseExpression(const std::vector<uint8_t>& b, size_t
         if (op.op == "<>" || op.op == "<=" || op.op == ">=") {
             pos += 2;
         } else if (op.op == "AND" || op.op == "OR" || op.op == "XOR" || op.op == "EQV" || op.op == "IMP" || op.op == "MOD") {
-            pos += op.op.size();
+            // Check if it's a tokenized operator (single byte) or ASCII word
+            if (pos < b.size() && b[pos] >= 0x80 && tokenizer && tokenizer->getTokenName(b[pos]) == op.op) {
+                pos += 1; // Tokenized operator is single byte
+            } else {
+                pos += op.op.size(); // ASCII word
+            }
         } else {
-            pos += 1;
+            pos += 1; // Single character operator (ASCII or tokenized)
         }
         skipSpaces(b, pos);
 
