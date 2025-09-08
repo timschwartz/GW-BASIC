@@ -43,3 +43,18 @@ TEST_CASE("BasicDispatcher GOTO returns jump target", "[dispatcher]") {
     auto r = disp(stmt);
     REQUIRE(r == 120);
 }
+
+TEST_CASE("BasicDispatcher GOSUB returns jump target", "[dispatcher]") {
+    Tokenizer tok;
+    auto disp = BasicDispatcher(std::make_shared<Tokenizer>(tok));
+    auto stmt = crunchStmt(tok, "GOSUB 200");
+    auto r = disp(stmt);
+    REQUIRE(r == 200);
+}
+
+TEST_CASE("BasicDispatcher RETURN without GOSUB throws error", "[dispatcher]") {
+    Tokenizer tok;
+    auto disp = BasicDispatcher(std::make_shared<Tokenizer>(tok));
+    auto stmt = crunchStmt(tok, "RETURN");
+    REQUIRE_THROWS_AS(disp(stmt), expr::BasicError);
+}

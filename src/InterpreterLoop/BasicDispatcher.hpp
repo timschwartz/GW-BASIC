@@ -162,6 +162,8 @@ private:
     if (name == "GOTO") return doGOTO(b, pos);
     if (name == "FOR") return doFOR(b, pos);
     if (name == "NEXT") return doNEXT(b, pos);
+    if (name == "GOSUB") return doGOSUB(b, pos);
+    if (name == "RETURN") return doRETURN(b, pos);
     if (name == "LOAD") return doLOAD(b, pos);
     if (name == "SAVE") return doSAVE(b, pos);
     if (name == "END" || name == "STOP") return 0xFFFF; // sentinel for caller to halt
@@ -715,5 +717,42 @@ private:
             runtimeStack.popFor(dummy);
             return 0; // Continue to statement after NEXT
         }
+    }
+    
+    uint16_t doGOSUB(const std::vector<uint8_t>& b, size_t& pos) {
+        skipSpaces(b, pos);
+        
+        // Read target line number
+        uint16_t targetLine = readLineNumber(b, pos);
+        
+        // Create GOSUB frame - save current line and next statement position
+        gwbasic::GosubFrame frame{};
+        frame.returnLine = currentLine;
+        frame.returnTextPtr = 0; // We'll use this to indicate we should continue to next line
+        
+        // Push frame onto GOSUB stack
+        runtimeStack.pushGosub(frame);
+        
+        // Jump to target line
+        return targetLine;
+    }
+    
+    uint16_t doRETURN(const std::vector<uint8_t>& /*b*/, size_t& /*pos*/) {
+        // Pop GOSUB frame
+        gwbasic::GosubFrame frame{};
+        if (!runtimeStack.popGosub(frame)) {
+            throw expr::BasicError(3, "RETURN without GOSUB", 0);
+        }
+        
+        // Return to the line after the GOSUB
+        if (prog && frame.returnLine != 0) {
+            auto nextIt = prog->getNextLine(frame.returnLine);
+            if (nextIt.isValid()) {
+                return nextIt->lineNumber;
+            }
+        }
+        
+        // If we can't find the next line, just continue normally
+        return 0;
     }
 };
