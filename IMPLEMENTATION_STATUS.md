@@ -85,15 +85,15 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - **NEW**: Multi-dimensional array support with proper index expression evaluation
 - Complete test coverage for all implemented functions and array operations
 
-### Numeric Engine (75% Complete)
+### Numeric Engine (85% Complete)
 - ✅ **Basic Arithmetic**: Add, subtract, multiply, divide with proper overflow handling
 - ✅ **Comparison Operations**: All comparison operators with GW-BASIC semantics
 - ✅ **Math Functions**: ABS, SGN, INT, FIX, SQR, LOG, EXP, SIN, COS, TAN, ATN
 - ✅ **Random Numbers**: RND function with seed support
 - ✅ **Type Conversions**: Between Int16, Single, Double with GW-BASIC rules
 - ✅ **Error Handling**: Proper GW-BASIC error codes (6, 11, 5, 13)
-- ⚠️ **Missing**: PRINT USING formatting, MBF compatibility layer
-- ⚠️ **Missing**: Some advanced math functions
+- ✅ **PRINT USING Formatting**: Complete implementation with numeric patterns (#, ., ,), currency ($), sign (+/-), and asterisk fill (*)
+- ⚠️ **Missing**: MBF compatibility layer, some advanced math functions
 
 **Files**: `src/NumericEngine/` (NumericEngine.hpp, NumericEngine.cpp, test_numeric.cpp)
 
@@ -120,8 +120,9 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 
 **Files**: `src/InterpreterLoop/` (InterpreterLoop.hpp, InterpreterLoop.cpp, test_interpreterloop.cpp)
 
-### Basic Dispatcher (70% Complete)
+### Basic Dispatcher (80% Complete)
 - ✅ **PRINT Statement**: Basic text output with separators (`;`, `,`)
+- ✅ **PRINT USING Statement**: Formatted numeric output with format patterns (###.##, comma separators, currency symbols, sign indicators, asterisk fill)
 - ✅ **LET/Assignment**: Variable assignment with type coercion
 - ✅ **IF-THEN-ELSE**: Conditional execution with inline and line number branches
 - ✅ **FOR-NEXT Loops**: Complete loop implementation with STEP support
@@ -162,10 +163,10 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ❌ **Random Access**: GET, PUT, field operations
 - ❌ **Directory Operations**: FILES, KILL, NAME
 
-### Input/Output (25% Complete)
+### Input/Output (35% Complete)
 - ✅ **PRINT**: Basic output with some formatting
+- ✅ **PRINT USING**: Formatted numeric output with comprehensive pattern support (###.##, comma separators, currency symbols, sign indicators, asterisk fill)
 - ❌ **INPUT**: User input with prompts and validation
-- ❌ **PRINT USING**: Formatted output with picture strings
 - ❌ **Device I/O**: Printer (LPRINT), communications ports
 
 ### Graphics and Sound (0% Complete)
@@ -224,12 +225,12 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 | Tokenizer | 90% | ~800 | Stable |
 | Program Store | 95% | ~600 | Stable |
 | Expression Evaluator | 98% | ~1000 | Near Complete |
-| Numeric Engine | 75% | ~500 | Good Progress |
+| Numeric Engine | 85% | ~800 | Strong Progress |
 | Runtime System | 75% | ~400 | Foundation Ready |
 | Interpreter Loop | 80% | ~300 | Core Complete |
-| Basic Dispatcher | 70% | ~800 | Functional |
+| Basic Dispatcher | 80% | ~1000 | Well Featured |
 | User Interface | 60% | ~600 | Working |
-| **Overall** | **50%** | **~5000** | **Alpha Stage** |
+| **Overall** | **55%** | **~5500** | **Alpha Stage** |
 
 ## 🎯 Next Priority Items
 
@@ -241,11 +242,11 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 5. **String Garbage Collection**: Implement proper string memory management
 
 ### Medium Priority (Language Features)
-1. **PRINT USING**: Formatted output with picture strings
-2. **File I/O**: Sequential file operations (OPEN, CLOSE, INPUT#, PRINT#)
-3. **Error Handling**: ON ERROR GOTO and RESUME statements
-4. **User-Defined Functions**: DEF FN support
-5. **Time/Date Functions**: TIME$ and DATE$ implementation
+1. **File I/O**: Sequential file operations (OPEN, CLOSE, INPUT#, PRINT#)
+2. **Error Handling**: ON ERROR GOTO and RESUME statements
+3. **User-Defined Functions**: DEF FN support
+4. **Time/Date Functions**: TIME$ and DATE$ implementation
+5. **PRINT USING String Patterns**: Extend PRINT USING to support string formatting patterns
 
 ### Low Priority (Advanced Features)
 1. **Graphics**: Basic graphics statements (SCREEN, PSET, LINE)
@@ -263,10 +264,10 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - No INPUT statement for user interaction
 
 ### Important Issues  
-- PRINT USING formatting not implemented
 - Missing most string manipulation functions
 - No file I/O beyond LOAD/SAVE
-- Limited numeric formatting options
+- Limited numeric formatting options beyond PRINT USING
+- DIM statement and array runtime operations not implemented (element access works)
 
 ### Minor Issues
 - Some edge cases in tokenizer not handled
@@ -287,6 +288,9 @@ The reimplemented GW-BASIC can currently run simple programs such as:
 60 NEXT I
 70 MATRIX(2,3) = 42
 80 IF MATRIX[2,3] > 40 THEN PRINT "Matrix element is large!"
+85 PRINT USING "Currency: $###.##"; 123.45
+86 PRINT USING "Percentage: +##.#%"; 95.7
+87 PRINT USING "With commas: ###,###.##"; 12345.67
 90 END
 ```
 
@@ -296,6 +300,7 @@ It supports:
 - IF-THEN-ELSE conditionals  
 - GOTO and GOSUB/RETURN
 - Basic PRINT statements
+- **PRINT USING formatted output** with numeric patterns, currency symbols, comma separators, and sign indicators
 - Array element access with both A(I) and A[I] syntax
 - Multi-dimensional array element access
 - Program LOAD/SAVE operations

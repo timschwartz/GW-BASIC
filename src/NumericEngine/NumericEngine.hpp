@@ -26,6 +26,26 @@ struct FormatOptions {
     bool signTrailing{false};
 };
 
+// PRINT USING format patterns
+struct NumericPattern {
+    int digitsBefore{0};     // Number of # before decimal
+    int digitsAfter{0};      // Number of # after decimal  
+    bool hasDecimal{false};  // Has explicit decimal point
+    bool hasCommas{false};   // Has comma separators
+    bool leadingSign{false}; // + at start
+    bool trailingSign{false};// + at end
+    bool asteriskFill{false};// * fill
+    bool dollarSign{false};  // $ sign
+    bool floatDollar{false}; // $$ floating dollar
+    bool exponential{false}; // ^^^^ exponential
+    int totalWidth{0};       // Total field width
+};
+
+struct StringPattern {
+    enum Type { SINGLE_CHAR, VARIABLE_LENGTH, FIXED_WIDTH } type;
+    int width{0};  // For fixed width patterns
+};
+
 // Error codes for numeric operations
 enum class NumericError {
     None = 0,
@@ -122,4 +142,10 @@ private:
     double convertToMBFDouble(double ieee754);
     float convertFromMBFSingle(float mbf);
     double convertFromMBFDouble(double mbf);
+    
+    // PRINT USING helper functions
+    std::optional<NumericPattern> parseNumericFormat(const std::string& format, size_t& pos);
+    std::optional<StringPattern> parseStringFormat(const std::string& format, size_t& pos);
+    std::string formatWithNumericPattern(const NumericPattern& pattern, const NumericValue& value);
+    std::string formatWithStringPattern(const StringPattern& pattern, const std::string& value);
 };

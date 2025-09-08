@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <random>
 #include <chrono>
+#include <optional>
 
 NumericEngine::NumericEngine() {
     // Initialize random seed with current time
@@ -380,6 +381,31 @@ NumericError NumericEngine::checkOverflow(double value, bool isSingle) {
     return NumericError::None;
 }
 
+std::string NumericEngine::printUsing(const std::string& format, const NumericValue& value) {
+    // Parse the format string and format the value according to GW-BASIC PRINT USING rules
+    if (format.empty()) {
+        return formatNumber(value);
+    }
+    
+    size_t pos = 0;
+    std::string result;
+    
+    // Look for numeric format patterns
+    if (auto numFormat = parseNumericFormat(format, pos)) {
+        return formatWithNumericPattern(*numFormat, value);
+    }
+    
+    // Look for string format patterns  
+    if (auto strFormat = parseStringFormat(format, pos)) {
+        // Convert numeric value to string for string formatting
+        std::string strValue = formatNumber(value);
+        return formatWithStringPattern(*strFormat, strValue);
+    }
+    
+    // If no format found, return the value formatted normally
+    return formatNumber(value);
+}
+
 std::string NumericEngine::formatFloatGWStyle(double value, const FormatOptions& options) {
     std::ostringstream oss;
     
@@ -453,4 +479,250 @@ float NumericEngine::convertFromMBFSingle(float mbf) {
 double NumericEngine::convertFromMBFDouble(double mbf) {
     // TODO: Implement actual MBF conversion
     return mbf;
+}
+
+// PRINT USING helper functions
+std::optional<NumericPattern> NumericEngine::parseNumericFormat(const std::string& format, size_t& pos) {
+    NumericPattern pattern;
+    size_t start = pos;
+    bool foundDigits = false;
+    
+    // Look for leading sign
+    if (pos < format.length() && format[pos] == '+') {
+        pattern.leadingSign = true;
+        ++pos;
+    }
+    
+    // Look for floating dollar signs $$
+    if (pos + 1 < format.length() && format[pos] == '$' && format[pos + 1] == '$') {
+        pattern.floatDollar = true;
+        pos += 2;
+    } else if (pos < format.length() && format[pos] == '$') {
+        pattern.dollarSign = true;
+        ++pos;
+    }
+    
+    // Look for asterisk fill
+    if (pos < format.length() && format[pos] == '*') {
+        pattern.asteriskFill = true;
+        ++pos;
+        // Skip additional asterisks
+        while (pos < format.length() && format[pos] == '*') ++pos;
+    }
+    
+    // Count digits before decimal point
+    while (pos < format.length() && format[pos] == '#') {
+        pattern.digitsBefore++;
+        foundDigits = true;
+        ++pos;
+    }
+    
+    // Check for comma (thousands separator)
+    if (pos < format.length() && format[pos] == ',') {
+        pattern.hasCommas = true;
+        ++pos;
+        // Continue counting digits with commas
+        while (pos < format.length()) {
+            if (format[pos] == '#') {
+                pattern.digitsBefore++;
+                foundDigits = true;
+                ++pos;
+            } else if (format[pos] == ',') {
+                ++pos; // Skip additional commas
+            } else {
+                break;
+            }
+        }
+    }
+    
+    // Check for decimal point
+    if (pos < format.length() && format[pos] == '.') {
+        pattern.hasDecimal = true;
+        ++pos;
+        
+        // Count digits after decimal point
+        while (pos < format.length() && format[pos] == '#') {
+            pattern.digitsAfter++;
+            foundDigits = true;
+            ++pos;
+        }
+    }
+    
+    // Check for exponential notation ^^^^
+    if (pos + 3 < format.length() && 
+        format.substr(pos, 4) == "^^^^") {
+        pattern.exponential = true;
+        pos += 4;
+        foundDigits = true;
+    }
+    
+    // Check for trailing sign
+    if (pos < format.length() && format[pos] == '+') {
+        pattern.trailingSign = true;
+        ++pos;
+    }
+    
+    // Calculate total width
+    pattern.totalWidth = static_cast<int>(pos - start);
+    
+    if (!foundDigits) {
+        pos = start; // Reset position if no pattern found
+        return std::nullopt;
+    }
+    
+    return pattern;
+}
+
+std::optional<StringPattern> NumericEngine::parseStringFormat(const std::string& format, size_t& pos) {
+    if (pos >= format.length()) return std::nullopt;
+    
+    StringPattern pattern;
+    
+    if (format[pos] == '!') {
+        // Single character pattern
+        pattern.type = StringPattern::SINGLE_CHAR;
+        pattern.width = 1;
+        ++pos;
+        return pattern;
+    }
+    
+    if (format[pos] == '&') {
+        // Variable length pattern
+        pattern.type = StringPattern::VARIABLE_LENGTH;
+        pattern.width = 0;
+        ++pos;
+        return pattern;
+    }
+    
+    if (format[pos] == '\\') {
+        // Fixed width pattern \   \
+        pattern.type = StringPattern::FIXED_WIDTH;
+        pattern.width = 2; // Minimum width (just the backslashes)
+        ++pos;
+        
+        // Count spaces between backslashes
+        while (pos < format.length() && format[pos] == ' ') {
+            pattern.width++;
+            ++pos;
+        }
+        
+        if (pos < format.length() && format[pos] == '\\') {
+            ++pos;
+            return pattern;
+        } else {
+            // Invalid pattern - backslash not closed
+            return std::nullopt;
+        }
+    }
+    
+    return std::nullopt;
+}
+
+std::string NumericEngine::formatWithNumericPattern(const NumericPattern& pattern, const NumericValue& value) {
+    // Convert value to double for formatting
+    double val = std::visit([](auto&& x) -> double {
+        using T = std::decay_t<decltype(x)>;
+        if constexpr (std::is_same_v<T, Int16>) return x.v;
+        if constexpr (std::is_same_v<T, Single>) return x.v;
+        if constexpr (std::is_same_v<T, Double>) return x.v;
+        return 0.0;
+    }, value);
+    
+    std::string result;
+    bool isNegative = val < 0;
+    val = std::abs(val);
+    
+    if (pattern.exponential) {
+        // Exponential format
+        std::ostringstream oss;
+        oss << std::scientific << std::setprecision(6) << val;
+        result = oss.str();
+        
+        // Convert 'e' to 'E' and ensure proper format
+        size_t ePos = result.find('e');
+        if (ePos != std::string::npos) {
+            result[ePos] = 'E';
+        }
+    } else {
+        // Fixed-point format
+        std::ostringstream oss;
+        
+        if (pattern.hasDecimal && pattern.digitsAfter > 0) {
+            oss << std::fixed << std::setprecision(pattern.digitsAfter);
+        }
+        
+        oss << val;
+        result = oss.str();
+        
+        // Add thousands separators if needed
+        if (pattern.hasCommas) {
+            size_t decimalPos = result.find('.');
+            size_t integerEnd = (decimalPos != std::string::npos) ? decimalPos : result.length();
+            
+            // Insert commas every 3 digits from the right
+            for (int i = static_cast<int>(integerEnd) - 3; i > 0; i -= 3) {
+                result.insert(i, ",");
+            }
+        }
+    }
+    
+    // Handle sign formatting
+    if (pattern.leadingSign || pattern.trailingSign) {
+        char sign = isNegative ? '-' : '+';
+        if (pattern.leadingSign) {
+            result = sign + result;
+        }
+        if (pattern.trailingSign) {
+            result = result + sign;
+        }
+    } else if (isNegative) {
+        result = "-" + result;
+    }
+    
+    // Handle dollar sign
+    if (pattern.floatDollar) {
+        result = "$$" + result;
+    } else if (pattern.dollarSign) {
+        result = "$" + result;
+    }
+    
+    // Pad or truncate to field width
+    if (pattern.totalWidth > 0) {
+        if (result.length() > static_cast<size_t>(pattern.totalWidth)) {
+            // Field overflow - return string with % prefix (GW-BASIC behavior)
+            return "%" + result;
+        }
+        
+        // Pad with spaces or asterisks
+        char fillChar = pattern.asteriskFill ? '*' : ' ';
+        while (result.length() < static_cast<size_t>(pattern.totalWidth)) {
+            result = fillChar + result;
+        }
+    }
+    
+    return result;
+}
+
+std::string NumericEngine::formatWithStringPattern(const StringPattern& pattern, const std::string& value) {
+    switch (pattern.type) {
+        case StringPattern::SINGLE_CHAR:
+            return value.empty() ? " " : std::string(1, value[0]);
+            
+        case StringPattern::VARIABLE_LENGTH:
+            return value;
+            
+        case StringPattern::FIXED_WIDTH:
+            if (value.length() >= static_cast<size_t>(pattern.width)) {
+                return value.substr(0, pattern.width);
+            } else {
+                // Pad with spaces
+                std::string result = value;
+                while (result.length() < static_cast<size_t>(pattern.width)) {
+                    result += " ";
+                }
+                return result;
+            }
+    }
+    
+    return value;
 }

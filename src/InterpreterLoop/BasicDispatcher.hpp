@@ -18,6 +18,7 @@
 #include "../Runtime/StringHeap.hpp"
 #include "../Runtime/Value.hpp"
 #include "../Runtime/RuntimeStack.hpp"
+#include "../NumericEngine/NumericEngine.hpp"
 
 // A dispatcher for a subset of BASIC statements to exercise the loop.
 // It supports:
@@ -154,6 +155,13 @@ private:
     static bool isSpace(uint8_t c) { return c==' '||c=='\t'||c=='\r'||c=='\n'; }
     static void skipSpaces(const std::vector<uint8_t>& b, size_t& pos) { while (pos < b.size() && isSpace(b[pos])) ++pos; }
 
+    // PRINT USING helper method for string formatting
+    std::string formatStringWithPattern(const std::string& formatString, const std::string& value) {
+        // Simple implementation - just return the value for now
+        // TODO: Implement proper string field parsing (&, !, \...\)
+        return value;
+    }
+
     uint16_t handleStatement(const std::vector<uint8_t>& b, size_t& pos) {
     uint8_t t = b[pos++]; // consume token
     // Map through Tokenizer public name lookup
@@ -176,6 +184,19 @@ private:
     }
 
     uint16_t doPRINT(const std::vector<uint8_t>& b, size_t& pos) {
+        // Check for PRINT USING syntax
+        skipSpaces(b, pos);
+        if (!atEnd(b, pos)) {
+            // Check if the next token is USING
+            if (tok) {
+                std::string nextTokenName = tok->getTokenName(b[pos]);
+                if (nextTokenName == "USING") {
+                    return doPRINTUSING(b, pos);
+                }
+            }
+        }
+        
+        // Regular PRINT statement
         bool newLine = true; // default prints newline
         bool first = true;
         std::string output;
@@ -183,8 +204,8 @@ private:
         while (!atEnd(b, pos)) {
             skipSpaces(b, pos);
             if (atEnd(b, pos)) break;
-            if (b[pos] == ';') { newLine = false; ++pos; continue; }
-            if (b[pos] == ',') { output += "\t"; ++pos; first = false; continue; }
+            if (b[pos] == 0xF6) { newLine = false; ++pos; continue; }  // semicolon token
+            if (b[pos] == 0xF5) { output += "\t"; ++pos; first = false; continue; }  // comma token
             // Expression
             auto res = ev.evaluate(b, pos, env);
             pos = res.nextPos;
@@ -201,6 +222,105 @@ private:
             if (!atEnd(b, pos) && b[pos] == ';') { newLine = false; ++pos; }
             if (!atEnd(b, pos) && b[pos] == ',') { output += "\t"; ++pos; }
         }
+        if (newLine) output += "\n";
+        
+        // Send output to callback if available, otherwise fall back to cout
+        if (printCallback) {
+            printCallback(output);
+        } else {
+            std::cout << output;
+        }
+        
+        return 0;
+    }
+
+    uint16_t doPRINTUSING(const std::vector<uint8_t>& b, size_t& pos) {
+        // Consume the USING token
+        ++pos;
+        
+        skipSpaces(b, pos);
+        
+        // Evaluate the format string expression
+        auto formatRes = ev.evaluate(b, pos, env);
+        pos = formatRes.nextPos;
+        
+        std::string formatString;
+        std::visit([&](auto&& x) {
+            using T = std::decay_t<decltype(x)>;
+            if constexpr (std::is_same_v<T, expr::Str>) {
+                formatString = x.v;
+            } else {
+                // Convert numeric to string for format
+                if constexpr (std::is_same_v<T, expr::Int16>) formatString = std::to_string(x.v);
+                else if constexpr (std::is_same_v<T, expr::Single>) formatString = std::to_string(x.v);
+                else if constexpr (std::is_same_v<T, expr::Double>) formatString = std::to_string(x.v);
+            }
+        }, formatRes.value);
+        
+        skipSpaces(b, pos);
+        
+        // Expect semicolon after format string (semicolon is tokenized as 0xF6)
+        if (!atEnd(b, pos) && b[pos] == 0xF6) {
+            ++pos;
+        } else {
+            throw expr::BasicError(2, "Expected ';' after USING format string", pos);
+        }
+        
+        std::string output;
+        bool first = true;
+        bool newLine = true;
+        
+        // Process the value list
+        while (!atEnd(b, pos)) {
+            skipSpaces(b, pos);
+            if (atEnd(b, pos)) break;
+            
+            // Handle separators
+            if (b[pos] == 0xF6) {  // semicolon token
+                newLine = false; 
+                ++pos; 
+                continue; 
+            }
+            if (b[pos] == 0xF5) {  // comma token
+                // For PRINT USING, comma usually means next field, 
+                // but we'll treat it as continuation
+                ++pos; 
+                first = false; 
+                continue; 
+            }
+            
+            // Evaluate the expression
+            auto res = ev.evaluate(b, pos, env);
+            pos = res.nextPos;
+            
+            // Format the value using the format string
+            std::string formattedValue;
+            std::visit([&](auto&& x) {
+                using T = std::decay_t<decltype(x)>;
+                if constexpr (std::is_same_v<T, expr::Str>) {
+                    // String value - use string patterns in format
+                    formattedValue = formatStringWithPattern(formatString, x.v);
+                } else {
+                    // Numeric value - use numeric patterns in format
+                    NumericEngine numEngine;
+                    NumericValue numVal;
+                    if constexpr (std::is_same_v<T, expr::Int16>) numVal = Int16{x.v};
+                    else if constexpr (std::is_same_v<T, expr::Single>) numVal = Single{x.v};
+                    else if constexpr (std::is_same_v<T, expr::Double>) numVal = Double{x.v};
+                    
+                    formattedValue = numEngine.printUsing(formatString, numVal);
+                }
+            }, res.value);
+            
+            output += formattedValue;
+            first = false;
+            
+            skipSpaces(b, pos);
+            if (!atEnd(b, pos) && b[pos] == ':') { ++pos; break; }
+            if (!atEnd(b, pos) && b[pos] == ';') { newLine = false; ++pos; }
+            if (!atEnd(b, pos) && b[pos] == ',') { ++pos; }
+        }
+        
         if (newLine) output += "\n";
         
         // Send output to callback if available, otherwise fall back to cout

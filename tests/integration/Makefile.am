@@ -5,6 +5,7 @@ AM_CPPFLAGS = -I$(top_srcdir)/src \
               -I$(top_srcdir)/src/ProgramStore \
               -I$(top_srcdir)/src/Tokenizer \
               -I$(top_srcdir)/src/ExpressionEvaluator \
+              -I$(top_srcdir)/src/NumericEngine \
               -I$(top_srcdir)/src/Runtime
 
 # Integration test programs (not run automatically, but can be built)
@@ -14,13 +15,15 @@ test_load_SOURCES = test_load.cpp
 test_load_LDADD = $(top_builddir)/src/InterpreterLoop/libinterpreterloop.la \
                   $(top_builddir)/src/ProgramStore/libprogramstore.la \
                   $(top_builddir)/src/Tokenizer/libtokenizer.la \
-                  $(top_builddir)/src/ExpressionEvaluator/libexpressionevaluator.la
+                  $(top_builddir)/src/ExpressionEvaluator/libexpressionevaluator.la \
+                  $(top_builddir)/src/NumericEngine/libnumericengine.la
 
 test_gosub_return_SOURCES = test_gosub_return.cpp
 test_gosub_return_LDADD = $(top_builddir)/src/InterpreterLoop/libinterpreterloop.la \
                           $(top_builddir)/src/ProgramStore/libprogramstore.la \
                           $(top_builddir)/src/Tokenizer/libtokenizer.la \
                           $(top_builddir)/src/ExpressionEvaluator/libexpressionevaluator.la \
+                          $(top_builddir)/src/NumericEngine/libnumericengine.la \
                           -lCatch2Main -lCatch2
 
 # Mark these as manual tests since they require example files
