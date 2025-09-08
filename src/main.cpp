@@ -108,9 +108,7 @@ public:
                 }
                 return result;
             } catch (const std::exception& e) {
-                print("?ERROR: ");
-                print(e.what());
-                print("\n");
+                errorPrint(e.what());
                 return 0;
             }
         });
@@ -162,11 +160,7 @@ public:
                         linesLoaded++;
                     }
                 } catch (const std::exception& e) {
-                    print("?Syntax error in line ");
-                    print(std::to_string(lineNum));
-                    print(": ");
-                    print(e.what());
-                    print("\n");
+                    errorPrint("Syntax error in line " + std::to_string(lineNum) + ": " + e.what());
                 }
             } else {
                 // Line without line number - treat as immediate command
@@ -340,6 +334,16 @@ private:
         for (char ch : text) {
             printChar(ch);
         }
+    }
+    
+    void errorPrint(const std::string& message) {
+        std::string errorMsg = "Error: " + message;
+        
+        // Output to console stderr
+        std::cerr << errorMsg << std::endl;
+        
+        // Output to SDL
+        print(errorMsg + "\n");
     }
     
     void printChar(char ch) {
@@ -640,9 +644,7 @@ private:
                     // END/STOP in immediate mode
                 }
             } catch (const std::exception& e) {
-                print("?ERROR: ");
-                print(e.what());
-                print("\n");
+                errorPrint(e.what());
             }
         }
         
@@ -680,7 +682,7 @@ private:
                 auto tokens = tokenizer->crunch(statement);
                 programStore->insertLine(static_cast<uint16_t>(lineNumber), tokens);
             } catch (const std::exception& e) {
-                print("?Syntax error\n");
+                errorPrint("Syntax error");
             }
         }
         
@@ -746,9 +748,7 @@ private:
         try {
             interpreter->run();
         } catch (const std::exception& e) {
-            print("?Runtime error: ");
-            print(e.what());
-            print("\n");
+            errorPrint("Runtime error: " + std::string(e.what()));
         }
     }
     
@@ -859,6 +859,19 @@ private:
     }
 };
 
+// Helper function to output errors to both console stderr and SDL (if available)
+void outputError(const std::string& message, std::function<void(const std::string&)> printCallback = nullptr) {
+    std::string errorMsg = "Error: " + message;
+    
+    // Always output to console stderr
+    std::cerr << errorMsg << std::endl;
+    
+    // Also output to SDL if callback is available
+    if (printCallback) {
+        printCallback(errorMsg);
+    }
+}
+
 // Console-only mode for piped input
 int runConsoleMode(int argc, char* argv[]) {
     // Initialize GW-BASIC components
@@ -944,7 +957,7 @@ int runConsoleMode(int argc, char* argv[]) {
                     auto tokens = tokenizer->crunch(statement);
                     programStore->insertLine(static_cast<uint16_t>(lineNumber), tokens);
                 } catch (const std::exception& e) {
-                    std::cout << "?Syntax error\n";
+                    outputError("Syntax error");
                 }
             }
         } else {
@@ -992,7 +1005,7 @@ int runConsoleMode(int argc, char* argv[]) {
                             }
                         }
                     } catch (const std::exception& e) {
-                        std::cout << "?Runtime error: " << e.what() << "\n";
+                        outputError("Runtime error: " + std::string(e.what()));
                     }
                 }
             } else if (upperInput == "NEW" || upperInput == "CLEAR") {
@@ -1004,7 +1017,7 @@ int runConsoleMode(int argc, char* argv[]) {
                     auto tokens = tokenizer->crunch(inputLine);
                     (*dispatcher)(tokens);
                 } catch (const std::exception& e) {
-                    std::cout << "?ERROR: " << e.what() << "\n";
+                    outputError(e.what());
                 }
             }
         }

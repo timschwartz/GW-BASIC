@@ -20,6 +20,7 @@
 #include "../Runtime/RuntimeStack.hpp"
 #include "../Runtime/ArrayManager.hpp"
 #include "../Runtime/EventTraps.hpp"
+#include "../Runtime/DataManager.hpp"
 #include "../NumericEngine/NumericEngine.hpp"
 
 // A dispatcher for a subset of BASIC statements to exercise the loop.
@@ -38,7 +39,7 @@ public:
     using InputCallback = std::function<std::string(const std::string&)>; // prompt -> input
     
     BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr)
-        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), printCallback(printCb), inputCallback(inputCb) {
+        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), printCallback(printCb), inputCallback(inputCb) {
         // Wire up cross-references
         vars.setStringHeap(&strHeap);
         vars.setArrayManager(&arrayManager);
@@ -117,6 +118,9 @@ public:
     // Access to event trap system
     gwbasic::EventTrapSystem* getEventTrapSystem() { return &eventTraps; }
     
+    // Access to data manager for program loading
+    void resetDataManager() { dataManager.restore(); }
+    
     // Set test mode to avoid waiting for input
     void setTestMode(bool enabled) { testMode = enabled; }
 
@@ -132,6 +136,7 @@ private:
     gwbasic::ArrayManager arrayManager;
     gwbasic::RuntimeStack runtimeStack;
     gwbasic::EventTrapSystem eventTraps;
+    gwbasic::DataManager dataManager;
     expr::Env env;
     PrintCallback printCallback;
     InputCallback inputCallback;
@@ -168,14 +173,17 @@ private:
                 break;
             case ScalarType::String: {
                 // Allocate string in runtime heap
-                std::string s = std::visit([](auto&& x)->std::string{
+                std::string s = std::visit([this](auto&& x)->std::string{
                     using T = std::decay_t<decltype(x)>;
                     if constexpr (std::is_same_v<T, expr::Str>) return x.v;
-                    else throw expr::BasicError(13, "Type mismatch", 0);
+                    else {
+                        this->throwBasicError(13, "Type mismatch", 0);
+                        return std::string{}; // Never reached, but needed for compile
+                    }
                 }, v);
                 gwbasic::StrDesc sd{};
                 if (!strHeap.allocCopy(reinterpret_cast<const uint8_t*>(s.data()), static_cast<uint16_t>(s.size()), sd)) {
-                    throw expr::BasicError(7, "Out of string space", 0);
+                    throwBasicError(7, "Out of string space", 0);
                 }
                 out = gwbasic::Value::makeString(sd);
                 break;
@@ -203,7 +211,7 @@ private:
                 // Allocate string in runtime heap
                 gwbasic::StrDesc sd{};
                 if (!strHeap.allocCopy(reinterpret_cast<const uint8_t*>(x.v.data()), static_cast<uint16_t>(x.v.size()), sd)) {
-                    throw expr::BasicError(7, "Out of string space", 0);
+                    throwBasicError(7, "Out of string space", 0);
                 }
                 out = gwbasic::Value::makeString(sd);
             }
@@ -211,7 +219,11 @@ private:
         return out;
     }
 
-    static bool atEnd(const std::vector<uint8_t>& b, size_t pos) { return pos >= b.size() || b[pos] == 0x00; }
+    static bool atEnd(const std::vector<uint8_t>& b, size_t pos) { 
+        // Only check for end of vector, not embedded 0x00 bytes
+        // 0x00 bytes can appear in tokenized integers and should not terminate parsing
+        return pos >= b.size(); 
+    }
     static bool isSpace(uint8_t c) { return c==' '||c=='\t'||c=='\r'||c=='\n'; }
     static void skipSpaces(const std::vector<uint8_t>& b, size_t& pos) { while (pos < b.size() && isSpace(b[pos])) ++pos; }
 
@@ -220,6 +232,30 @@ private:
         // Simple implementation - just return the value for now
         // TODO: Implement proper string field parsing (&, !, \...\)
         return value;
+    }
+
+    // Helper method to send error messages to both console and SDL output
+    void reportError(const std::string& errorMessage) {
+        std::string fullMessage;
+        if (currentLine > 0) {
+            fullMessage = "Error in line " + std::to_string(currentLine) + ": " + errorMessage;
+        } else {
+            fullMessage = "Error: " + errorMessage;
+        }
+        
+        // Send to console stderr
+        std::cerr << fullMessage << std::endl;
+        
+        // Send to SDL output via printCallback
+        if (printCallback) {
+            printCallback(fullMessage + "\n");
+        }
+    }
+
+    // Helper method to create and throw BasicError with dual output
+    void throwBasicError(int code, const std::string& message, size_t position) {
+        reportError(message);
+        throw expr::BasicError(code, message, position);
     }
 
     uint16_t handleStatement(const std::vector<uint8_t>& b, size_t& pos) {
@@ -231,6 +267,9 @@ private:
     if (name == "INPUT") return doINPUT(b, pos);
     if (name == "LET") return handleLet(b, pos, /*implied*/false);
     if (name == "DIM") return doDIM(b, pos);
+    if (name == "READ") return doREAD(b, pos);
+    if (name == "DATA") return doDATA(b, pos);
+    if (name == "RESTORE") return doRESTORE(b, pos);
     if (name == "IF") return doIF(b, pos);
     if (name == "GOTO") return doGOTO(b, pos);
     if (name == "FOR") return doFOR(b, pos);
@@ -328,7 +367,7 @@ private:
         if (!atEnd(b, pos) && b[pos] == 0xF6) {
             ++pos;
         } else {
-            throw expr::BasicError(2, "Expected ';' after USING format string", pos);
+            throwBasicError(2, "Expected ';' after USING format string", pos);
         }
         
         std::string output;
@@ -542,7 +581,7 @@ private:
     uint16_t handleLet(const std::vector<uint8_t>& b, size_t& pos, bool implied) {
         skipSpaces(b, pos);
         auto name = readIdentifier(b, pos);
-        if (name.empty()) throw expr::BasicError(2, "Syntax error", pos);
+        if (name.empty()) throwBasicError(2, "Syntax error", pos);
         skipSpaces(b, pos);
         
         // Check if this is an array assignment: VAR(indices) = expr
@@ -581,7 +620,7 @@ private:
             while (!atEnd(b, pos) && !isClosingBracket(b[pos])) {
                 skipSpaces(b, pos);
                 if (atEnd(b, pos)) {
-                    throw expr::BasicError(2, "Missing closing bracket in array assignment", pos);
+                    throwBasicError(2, "Missing closing bracket in array assignment", pos);
                 }
                 
                 // Evaluate index expression
@@ -618,7 +657,7 @@ private:
             }
             
             if (!found_closing_bracket) {
-                throw expr::BasicError(2, "Missing closing bracket in array assignment", pos);
+                throwBasicError(2, "Missing closing bracket in array assignment", pos);
             }
             
             skipSpaces(b, pos);
@@ -628,7 +667,7 @@ private:
                 b[pos] == '=' ||
                 (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "=")
             )) {
-                throw expr::BasicError(2, "Expected = in array assignment", pos);
+                throwBasicError(2, "Expected = in array assignment", pos);
             }
             ++pos; // consume '='
             
@@ -641,7 +680,7 @@ private:
             // Convert expression value to runtime value and store in array
             gwbasic::Value runtimeValue = toRuntimeValueForArray(name, res.value);
             if (!vars.setArrayElement(name, indices, runtimeValue)) {
-                throw expr::BasicError(9, "Subscript out of range or type mismatch", pos);
+                throwBasicError(9, "Subscript out of range or type mismatch", pos);
             }
             
             return 0;
@@ -652,7 +691,7 @@ private:
             b[pos] == '=' ||
             (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "=")
         )) {
-            if (implied) throw expr::BasicError(2, "Syntax error: expected =", pos);
+            if (implied) throwBasicError(2, "Syntax error: expected =", pos);
             // plain LET with no assignment? treat as no-op
             return 0;
         }
@@ -1952,6 +1991,276 @@ private:
         if (start == std::string::npos) return "";
         size_t end = str.find_last_not_of(" \t\r\n");
         return str.substr(start, end - start + 1);
+    }
+
+    // READ statement implementation
+    uint16_t doREAD(const std::vector<uint8_t>& b, size_t& pos) {
+        // READ variable[,variable]...
+        
+        std::cerr << "DEBUG: doREAD() - starting, pos=" << pos << ", line has " << b.size() << " bytes" << std::endl;
+        std::cerr << "DEBUG: doREAD() - tokens from pos:";
+        for (size_t i = pos; i < b.size() && i < pos + 10; ++i) {
+            std::cerr << " 0x" << std::hex << static_cast<int>(b[i]) << std::dec;
+        }
+        std::cerr << std::endl;
+        
+        std::vector<std::string> variables;
+        
+        // Parse list of variables
+        while (!atEnd(b, pos)) {
+            skipSpaces(b, pos);
+            if (atEnd(b, pos) || b[pos] == ':') break;
+            
+            auto varName = readIdentifier(b, pos);
+            if (varName.empty()) {
+                throwBasicError(2, "Expected variable name in READ", pos);
+            }
+            
+            variables.push_back(varName);
+            
+            skipSpaces(b, pos);
+            
+            // Check for comma (more variables)
+            if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) { // 0xF5 is tokenized comma
+                ++pos; // consume comma
+                continue;
+            }
+            
+            // End of variable list
+            break;
+        }
+        
+        if (variables.empty()) {
+            throwBasicError(2, "No variables specified in READ", pos);
+        }
+        
+        // Read values from DATA statements and assign to variables
+        for (const auto& varName : variables) {
+            std::cerr << "DEBUG: doREAD() - reading value for variable: " << varName << std::endl;
+            gwbasic::Value value;
+            if (!dataManager.readValue(value)) {
+                throwBasicError(4, "Out of DATA", pos);
+            }
+            
+            std::cerr << "DEBUG: doREAD() - value read, calling assignDataValue" << std::endl;
+            // Assign the value to the variable
+            assignDataValue(varName, value);
+            std::cerr << "DEBUG: doREAD() - assignDataValue returned successfully" << std::endl;
+        }
+        
+        // Skip any trailing spaces or null bytes
+        while (pos < b.size() && (isSpace(b[pos]) || b[pos] == 0x00)) {
+            ++pos;
+        }
+        
+        std::cerr << "DEBUG: doREAD() - all variables processed, returning, final pos=" << pos << std::endl;
+        std::cerr << "DEBUG: doREAD() - remaining bytes:";
+        for (size_t i = pos; i < b.size(); ++i) {
+            std::cerr << " 0x" << std::hex << static_cast<int>(b[i]) << std::dec;
+        }
+        std::cerr << std::endl;
+        return 0;
+    }
+    
+    // DATA statement implementation
+    uint16_t doDATA(const std::vector<uint8_t>& b, size_t& pos) {
+        // DATA statements are passive - they just contain data to be read
+        // The DataManager handles parsing them when READ statements are executed
+        // But we need to skip over the data values to avoid parsing them as statements
+        
+        // Skip over all data values until we reach end of line or statement separator
+        while (!atEnd(b, pos) && b[pos] != ':') {
+            // Skip whitespace
+            while (!atEnd(b, pos) && (b[pos] == ' ' || b[pos] == '\t')) {
+                pos++;
+            }
+            
+            if (atEnd(b, pos) || b[pos] == ':') break;
+            
+            // Skip comma separator
+            if (b[pos] == ',' || b[pos] == 0xF5) {
+                pos++;
+                continue;
+            }
+            
+            // Parse and skip token value
+            uint8_t token = b[pos];
+            
+            if (token == '"') {
+                // String literal - skip to closing quote
+                pos++; // Skip opening quote
+                while (!atEnd(b, pos) && b[pos] != '"' && b[pos] != 0x00) {
+                    pos++;
+                }
+                if (!atEnd(b, pos) && b[pos] == '"') {
+                    pos++; // Skip closing quote
+                }
+            } else if (token == 0x11) {
+                // Tokenized integer - skip 3 bytes total
+                pos += 3;
+            } else if (token == 0x1C) {
+                // Single precision float - skip 5 bytes total  
+                pos += 5;
+            } else if (token == 0x1F) {
+                // Double precision - skip 9 bytes total
+                pos += 9;
+            } else {
+                // Unknown token, skip one byte
+                pos++;
+            }
+        }
+        
+        return 0;
+    }
+    
+    // RESTORE statement implementation
+    uint16_t doRESTORE(const std::vector<uint8_t>& b, size_t& pos) {
+        // RESTORE [line_number]
+        
+        skipSpaces(b, pos);
+        
+        if (atEnd(b, pos) || b[pos] == ':' || b[pos] == 0x00) {
+            // RESTORE without line number - restore to beginning
+            dataManager.restore();
+        } else {
+            // RESTORE with line number
+            uint16_t lineNumber = readLineNumber(b, pos);
+            dataManager.restore(lineNumber);
+        }
+        
+        return 0;
+    }
+
+private:
+    // Helper method to assign a data value to a variable
+    void assignDataValue(const std::string& varName, const gwbasic::Value& value) {
+        std::cerr << "DEBUG: assignDataValue() called for variable '" << varName << "'" << std::endl;
+        
+        // Get or create variable
+        gwbasic::VarSlot& slot = vars.getOrCreate(varName);
+        std::cerr << "DEBUG: assignDataValue() - variable type: " << static_cast<int>(slot.scalar.type) << std::endl;
+        
+        // Convert the data value to the appropriate type for the variable
+        switch (slot.scalar.type) {
+            case gwbasic::ScalarType::Int16: {
+                int16_t intVal = 0;
+                switch (value.type) {
+                    case gwbasic::ScalarType::Int16:
+                        intVal = value.i;
+                        break;
+                    case gwbasic::ScalarType::Single:
+                        intVal = static_cast<int16_t>(value.f);
+                        break;
+                    case gwbasic::ScalarType::Double:
+                        intVal = static_cast<int16_t>(value.d);
+                        break;
+                    case gwbasic::ScalarType::String: {
+                        // Try to parse string as number
+                        std::string str(reinterpret_cast<const char*>(value.s.ptr), value.s.len);
+                        try {
+                            intVal = static_cast<int16_t>(std::stoi(str));
+                        } catch (...) {
+                            intVal = 0; // Default on parse error
+                        }
+                        break;
+                    }
+                }
+                slot.scalar = gwbasic::Value::makeInt(intVal);
+                std::cerr << "DEBUG: assignDataValue() - assigned int value: " << intVal << std::endl;
+                break;
+            }
+            
+            case gwbasic::ScalarType::Single: {
+                float floatVal = 0.0f;
+                switch (value.type) {
+                    case gwbasic::ScalarType::Int16:
+                        floatVal = static_cast<float>(value.i);
+                        break;
+                    case gwbasic::ScalarType::Single:
+                        floatVal = value.f;
+                        break;
+                    case gwbasic::ScalarType::Double:
+                        floatVal = static_cast<float>(value.d);
+                        break;
+                    case gwbasic::ScalarType::String: {
+                        // Try to parse string as number
+                        std::string str(reinterpret_cast<const char*>(value.s.ptr), value.s.len);
+                        try {
+                            floatVal = std::stof(str);
+                        } catch (...) {
+                            floatVal = 0.0f; // Default on parse error
+                        }
+                        break;
+                    }
+                }
+                slot.scalar = gwbasic::Value::makeSingle(floatVal);
+                break;
+            }
+            
+            case gwbasic::ScalarType::Double: {
+                double doubleVal = 0.0;
+                switch (value.type) {
+                    case gwbasic::ScalarType::Int16:
+                        doubleVal = static_cast<double>(value.i);
+                        break;
+                    case gwbasic::ScalarType::Single:
+                        doubleVal = static_cast<double>(value.f);
+                        break;
+                    case gwbasic::ScalarType::Double:
+                        doubleVal = value.d;
+                        break;
+                    case gwbasic::ScalarType::String: {
+                        // Try to parse string as number
+                        std::string str(reinterpret_cast<const char*>(value.s.ptr), value.s.len);
+                        try {
+                            doubleVal = std::stod(str);
+                        } catch (...) {
+                            doubleVal = 0.0; // Default on parse error
+                        }
+                        break;
+                    }
+                }
+                slot.scalar = gwbasic::Value::makeDouble(doubleVal);
+                break;
+            }
+            
+            case gwbasic::ScalarType::String: {
+                if (value.type == gwbasic::ScalarType::String) {
+                    // Copy string value
+                    gwbasic::StrDesc sd{};
+                    if (!strHeap.allocCopy(value.s.ptr, value.s.len, sd)) {
+                        throw expr::BasicError(7, "Out of string space", 0);
+                    }
+                    slot.scalar = gwbasic::Value::makeString(sd);
+                } else {
+                    // Convert numeric to string
+                    std::string str;
+                    switch (value.type) {
+                        case gwbasic::ScalarType::Int16:
+                            str = std::to_string(value.i);
+                            break;
+                        case gwbasic::ScalarType::Single:
+                            str = std::to_string(value.f);
+                            break;
+                        case gwbasic::ScalarType::Double:
+                            str = std::to_string(value.d);
+                            break;
+                        default:
+                            str = "0";
+                            break;
+                    }
+                    
+                    gwbasic::StrDesc sd{};
+                    if (!strHeap.allocCopy(reinterpret_cast<const uint8_t*>(str.c_str()), 
+                                          static_cast<uint16_t>(str.length()), sd)) {
+                        throw expr::BasicError(7, "Out of string space", 0);
+                    }
+                    slot.scalar = gwbasic::Value::makeString(sd);
+                }
+                break;
+            }
+        }
+        std::cerr << "DEBUG: assignDataValue() - assignment complete" << std::endl;
     }
 
 public:

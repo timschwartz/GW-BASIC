@@ -151,8 +151,9 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **StringManager**: High-level interface for string operations including creation, concatenation, slicing (LEFT$, RIGHT$, MID$), search (INSTR), comparison, and RAII-managed temporary strings
 - ✅ **Array Runtime**: Complete array implementation with ArrayManager, DIM statement support, multi-dimensional arrays, and full integration with expression evaluator and variable table
 - ✅ **Event Trap System**: Complete EventTrapSystem with support for KEY, ERROR, TIMER, PEN, PLAY, STRIG, and COM events with trap configuration, event injection, and checking mechanisms
+- ✅ **Data Management**: DataManager component for READ/DATA/RESTORE functionality with sequential data reading, type conversion, and pointer management
 
-**Files**: `src/Runtime/` (Value.hpp, VariableTable.hpp, RuntimeStack.hpp, StringTypes.hpp, ArrayTypes.hpp, ArrayManager.hpp, ArrayManager.cpp, StringHeap.hpp, StringManager.hpp, EventTraps.hpp, EventTraps.cpp)
+**Files**: `src/Runtime/` (Value.hpp, VariableTable.hpp, RuntimeStack.hpp, StringTypes.hpp, ArrayTypes.hpp, ArrayManager.hpp, ArrayManager.cpp, StringHeap.hpp, StringManager.hpp, EventTraps.hpp, EventTraps.cpp, DataManager.hpp, DataManager.cpp)
 
 **Recent Enhancements:**
 - ✅ **Complete Array Runtime**: Full ArrayManager implementation with create/access/modify operations for multi-dimensional arrays
@@ -174,7 +175,7 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 
 **Files**: `src/InterpreterLoop/` (InterpreterLoop.hpp, InterpreterLoop.cpp, test_interpreterloop.cpp)
 
-### Basic Dispatcher (95% Complete)
+### Basic Dispatcher (98% Complete)
 - ✅ **PRINT Statement**: Basic text output with separators (`;`, `,`)
 - ✅ **PRINT USING Statement**: Formatted numeric output with format patterns (###.##, comma separators, currency symbols, sign indicators, asterisk fill)
 - ✅ **LET/Assignment**: Variable assignment with type coercion
@@ -187,9 +188,10 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **Event Trap Statements**: Complete ON KEY, ON ERROR, ON TIMER statement handling
 - ✅ **Trap Control Statements**: KEY ON/OFF, ERROR handling (doERROR, doRESUME, doKEY, doTIMER)
 - ✅ **INPUT Statement**: Complete user input implementation with prompt support, cross-platform input handling (console/GUI modes), type coercion, and test mode support
+- ✅ **READ/DATA/RESTORE**: Complete data statement implementation with DataManager integration for sequential data reading and restoration
 - ✅ **END/STOP**: Program termination
 - ✅ **LOAD/SAVE**: Basic file I/O for program storage
-- ⚠️ **Missing**: READ/DATA/RESTORE, most other I/O statements
+- ⚠️ **Missing**: Most other I/O statements (OPEN, CLOSE, INPUT#, PRINT#)
 
 **Files**: `src/InterpreterLoop/BasicDispatcher.hpp`
 
@@ -243,8 +245,8 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 ### Advanced Language Features
 - ✅ **Arrays**: Complete implementation - DIM statement support, array element access (A(I,J) and A[I,J) syntax), multi-dimensional arrays, and full integration with expression evaluator and variable table
 - ✅ **Event Traps**: Complete implementation - ON KEY, ON ERROR, ON TIMER event handling with EventTrapSystem, event injection, trap configuration, and integration with InterpreterLoop and BasicDispatcher
+- ✅ **Data Statements**: Complete DATA, READ, RESTORE implementation with DataManager component for sequential data processing
 - ❌ **User-Defined Functions**: DEF FN statements
-- ❌ **Data Statements**: DATA, READ, RESTORE
 - ❌ **Error Handling**: Advanced error handling beyond basic traps
 
 ### Extended Statements
@@ -302,15 +304,15 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 | Numeric Engine | 95% | ~1200 | Near Complete |
 | Runtime System | 98% | ~1200 | Near Complete |
 | Interpreter Loop | 90% | ~350 | Core Complete |
-| Basic Dispatcher | 95% | ~1400 | Well Featured |
+| Basic Dispatcher | 98% | ~1400 | Well Featured |
 | User Interface | 70% | ~700 | Working |
 | **Overall** | **85%** | **~7250** | **Beta Stage** |
 
 ## 🎯 Next Priority Items
 
 ### High Priority (Core Language Completion)
-1. **DATA/READ/RESTORE**: Static data storage and retrieval
-2. **String Function Integration**: Integrate CHR$, STR$, VAL functions with runtime system
+1. **String Function Integration**: Integrate CHR$, STR$, VAL functions with runtime system
+2. **File I/O**: Sequential file operations (OPEN, CLOSE, INPUT#, PRINT#)
 3. **Error Handling Enhancement**: ON ERROR GOTO and RESUME statements
 
 ### Medium Priority (Language Features)
