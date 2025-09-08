@@ -10,6 +10,7 @@
 #include <cctype>
 #include "Value.hpp"
 #include "StringHeap.hpp"
+#include "ArrayManager.hpp"
 
 namespace gwbasic {
 
@@ -63,13 +64,13 @@ struct SymbolKeyHash {
 struct VarSlot {
     bool isArray{false};
     Value scalar{}; // valid when !isArray
-    // Array* array{nullptr}; // reserved for future integration
+    std::string arrayName{}; // valid when isArray - name for lookup in ArrayManager
 };
 
 class VariableTable : public StringRootProvider {
 public:
-    explicit VariableTable(DefaultTypeTable* deftbl, StringHeap* stringHeap = nullptr) 
-        : deftbl_(deftbl), stringHeap_(stringHeap) {
+    explicit VariableTable(DefaultTypeTable* deftbl, StringHeap* stringHeap = nullptr, ArrayManager* arrayManager = nullptr) 
+        : deftbl_(deftbl), stringHeap_(stringHeap), arrayManager_(arrayManager) {
         if (stringHeap_) {
             stringHeap_->addRootProvider(this);
         }
@@ -90,6 +91,11 @@ public:
         if (stringHeap_) {
             stringHeap_->addRootProvider(this);
         }
+    }
+
+    // Set or change the associated array manager
+    void setArrayManager(ArrayManager* manager) {
+        arrayManager_ = manager;
     }
 
     // Resolve or create a scalar variable by name (may include suffix). Empty suffix => infer from DEFTBL.
@@ -150,6 +156,66 @@ public:
         }
     }
 
+    // Create an array variable
+    bool createArray(const std::string& rawName, ScalarType type, const std::vector<int16_t>& dimensions) {
+        if (!arrayManager_) return false;
+        
+        SymbolKey key = normalize(rawName);
+        
+        // Check if variable already exists
+        auto it = table_.find(key);
+        if (it != table_.end()) {
+            return false; // Variable already exists
+        }
+        
+        // Create array in ArrayManager
+        if (!arrayManager_->createArray(rawName, type, dimensions)) {
+            return false; // Failed to create array
+        }
+        
+        // Create array slot in variable table
+        VarSlot slot{};
+        slot.isArray = true;
+        slot.arrayName = rawName;
+        
+        table_[key] = slot;
+        return true;
+    }
+
+    // Check if a variable is an array
+    bool isArray(const std::string& rawName) const {
+        SymbolKey key = normalize(rawName);
+        auto it = table_.find(key);
+        if (it == table_.end()) return false;
+        return it->second.isArray;
+    }
+
+    // Get array element
+    bool getArrayElement(const std::string& rawName, const std::vector<int32_t>& indices, Value& out) const {
+        if (!arrayManager_) return false;
+        
+        SymbolKey key = normalize(rawName);
+        auto it = table_.find(key);
+        if (it == table_.end() || !it->second.isArray) {
+            return false; // Not an array variable
+        }
+        
+        return arrayManager_->getElement(it->second.arrayName, indices, out);
+    }
+
+    // Set array element
+    bool setArrayElement(const std::string& rawName, const std::vector<int32_t>& indices, const Value& value) {
+        if (!arrayManager_) return false;
+        
+        SymbolKey key = normalize(rawName);
+        auto it = table_.find(key);
+        if (it == table_.end() || !it->second.isArray) {
+            return false; // Not an array variable
+        }
+        
+        return arrayManager_->setElement(it->second.arrayName, indices, value);
+    }
+
     // Clear all variables (useful for NEW command)
     void clear() {
         table_.clear();
@@ -167,7 +233,7 @@ public:
             if (!v.isArray && v.scalar.type == ScalarType::String) {
                 roots.push_back(&v.scalar.s);
             }
-            // TODO: When arrays are implemented, also collect string array elements
+            // String array elements are handled by ArrayManager's StringRootProvider implementation
         }
     }
 
@@ -206,6 +272,7 @@ private:
     std::unordered_map<SymbolKey, VarSlot, SymbolKeyHash> table_;
     DefaultTypeTable* deftbl_;
     StringHeap* stringHeap_;
+    ArrayManager* arrayManager_;
 };
 
 } // namespace gwbasic

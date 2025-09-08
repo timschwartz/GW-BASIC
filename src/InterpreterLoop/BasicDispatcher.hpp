@@ -18,6 +18,7 @@
 #include "../Runtime/StringHeap.hpp"
 #include "../Runtime/Value.hpp"
 #include "../Runtime/RuntimeStack.hpp"
+#include "../Runtime/ArrayManager.hpp"
 #include "../NumericEngine/NumericEngine.hpp"
 
 // A dispatcher for a subset of BASIC statements to exercise the loop.
@@ -35,13 +36,35 @@ public:
     using PrintCallback = std::function<void(const std::string&)>;
     
     BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr)
-        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), printCallback(printCb) {
+        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), printCallback(printCb) {
+        // Wire up cross-references
+        vars.setStringHeap(&strHeap);
+        vars.setArrayManager(&arrayManager);
+        
         // Wire evaluator env to read variables from VariableTable
         env.optionBase = 0;
         env.vars.clear();
         env.getVar = [this](const std::string& name, expr::Value& out) -> bool {
             if (auto* slot = vars.tryGet(name)) {
-                out = toExprValue(slot->scalar);
+                if (!slot->isArray) {
+                    out = toExprValue(slot->scalar);
+                    return true;
+                }
+            }
+            return false;
+        };
+        
+        // Wire array element access
+        env.getArrayElem = [this](const std::string& name, const std::vector<expr::Value>& indices, expr::Value& out) -> bool {
+            // Convert expression indices to runtime indices
+            std::vector<int32_t> runtimeIndices;
+            for (const auto& idx : indices) {
+                runtimeIndices.push_back(expr::ExpressionEvaluator::toInt16(idx));
+            }
+            
+            gwbasic::Value value;
+            if (vars.getArrayElement(name, runtimeIndices, value)) {
+                out = toExprValue(value);
                 return true;
             }
             return false;
@@ -98,6 +121,7 @@ private:
     gwbasic::VariableTable vars;
     uint8_t heapBuf[8192]{};
     gwbasic::StringHeap strHeap;
+    gwbasic::ArrayManager arrayManager;
     gwbasic::RuntimeStack runtimeStack;
     expr::Env env;
     PrintCallback printCallback;
@@ -151,6 +175,31 @@ private:
         return out;
     }
 
+    gwbasic::Value toRuntimeValueForArray(const std::string& arrayName, const expr::Value& v) {
+        // For array assignment, determine type from the array's type rather than variable table
+        // since array elements must match the array's type
+        
+        gwbasic::Value out{};
+        std::visit([&](auto&& x)->void{
+            using T = std::decay_t<decltype(x)>;
+            if constexpr (std::is_same_v<T, expr::Int16>) {
+                out = gwbasic::Value::makeInt(x.v);
+            } else if constexpr (std::is_same_v<T, expr::Single>) {
+                out = gwbasic::Value::makeSingle(x.v);
+            } else if constexpr (std::is_same_v<T, expr::Double>) {
+                out = gwbasic::Value::makeDouble(x.v);
+            } else if constexpr (std::is_same_v<T, expr::Str>) {
+                // Allocate string in runtime heap
+                gwbasic::StrDesc sd{};
+                if (!strHeap.allocCopy(reinterpret_cast<const uint8_t*>(x.v.data()), static_cast<uint16_t>(x.v.size()), sd)) {
+                    throw expr::BasicError(7, "Out of string space", 0);
+                }
+                out = gwbasic::Value::makeString(sd);
+            }
+        }, v);
+        return out;
+    }
+
     static bool atEnd(const std::vector<uint8_t>& b, size_t pos) { return pos >= b.size() || b[pos] == 0x00; }
     static bool isSpace(uint8_t c) { return c==' '||c=='\t'||c=='\r'||c=='\n'; }
     static void skipSpaces(const std::vector<uint8_t>& b, size_t& pos) { while (pos < b.size() && isSpace(b[pos])) ++pos; }
@@ -169,6 +218,7 @@ private:
     
     if (name == "PRINT") return doPRINT(b, pos);
     if (name == "LET") return handleLet(b, pos, /*implied*/false);
+    if (name == "DIM") return doDIM(b, pos);
     if (name == "IF") return doIF(b, pos);
     if (name == "GOTO") return doGOTO(b, pos);
     if (name == "FOR") return doFOR(b, pos);
@@ -476,6 +526,110 @@ private:
         auto name = readIdentifier(b, pos);
         if (name.empty()) throw expr::BasicError(2, "Syntax error", pos);
         skipSpaces(b, pos);
+        
+        // Check if this is an array assignment: VAR(indices) = expr
+        if (!atEnd(b, pos) && (b[pos] == '(' || b[pos] == '[' || b[pos] == 0xf3)) {
+            // Array assignment
+            char openBracket = '\0';
+            char closeBracket = '\0';
+            bool isTokenized = false;
+            
+            if (b[pos] == '(' || b[pos] == '[') {
+                openBracket = static_cast<char>(b[pos]);
+                closeBracket = (openBracket == '(') ? ')' : ']';
+                isTokenized = false;
+                ++pos; // consume opening bracket
+            } else if (b[pos] == 0xf3) {  // tokenized left parenthesis
+                openBracket = '(';
+                closeBracket = ')';
+                isTokenized = true;
+                ++pos; // consume opening bracket token
+            }
+            
+            // Parse indices
+            std::vector<int32_t> indices;
+            
+            // Define a lambda to check for closing bracket
+            auto isClosingBracket = [&](uint8_t ch) -> bool {
+                if (!isTokenized) {
+                    // We started with ASCII, expect ASCII closing
+                    return ch == closeBracket;
+                } else {
+                    // We started with tokenized parenthesis, expect tokenized closing
+                    return ch == 0xf4; // tokenized right parenthesis
+                }
+            };
+            
+            while (!atEnd(b, pos) && !isClosingBracket(b[pos])) {
+                skipSpaces(b, pos);
+                if (atEnd(b, pos)) {
+                    throw expr::BasicError(2, "Missing closing bracket in array assignment", pos);
+                }
+                
+                // Evaluate index expression
+                auto res = ev.evaluate(b, pos, env);
+                pos = res.nextPos;
+                
+                indices.push_back(expr::ExpressionEvaluator::toInt16(res.value));
+                
+                skipSpaces(b, pos);
+                
+                // Check for comma (more indices)
+                if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) { // 0xF5 is tokenized comma
+                    ++pos; // consume comma
+                    continue;
+                }
+                
+                break;
+            }
+            
+            // Expect closing bracket
+            bool found_closing_bracket = false;
+            if (!isTokenized) {
+                // We started with ASCII, expect ASCII closing
+                if (!atEnd(b, pos) && b[pos] == closeBracket) {
+                    found_closing_bracket = true;
+                    ++pos;
+                }
+            } else {
+                // We started with tokenized parenthesis, expect tokenized closing
+                if (!atEnd(b, pos) && b[pos] == 0xf4) { // tokenized right parenthesis
+                    found_closing_bracket = true;
+                    ++pos;
+                }
+            }
+            
+            if (!found_closing_bracket) {
+                throw expr::BasicError(2, "Missing closing bracket in array assignment", pos);
+            }
+            
+            skipSpaces(b, pos);
+            
+            // Expect equals sign
+            if (atEnd(b, pos) || !(
+                b[pos] == '=' ||
+                (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "=")
+            )) {
+                throw expr::BasicError(2, "Expected = in array assignment", pos);
+            }
+            ++pos; // consume '='
+            
+            skipSpaces(b, pos);
+            
+            // Evaluate value expression
+            auto res = ev.evaluate(b, pos, env);
+            pos = res.nextPos;
+            
+            // Convert expression value to runtime value and store in array
+            gwbasic::Value runtimeValue = toRuntimeValueForArray(name, res.value);
+            if (!vars.setArrayElement(name, indices, runtimeValue)) {
+                throw expr::BasicError(9, "Subscript out of range or type mismatch", pos);
+            }
+            
+            return 0;
+        }
+        
+        // Regular scalar assignment
         if (atEnd(b, pos) || !(
             b[pos] == '=' ||
             (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "=")
@@ -486,7 +640,7 @@ private:
         }
         ++pos; // consume '=' (ASCII or tokenized)
         skipSpaces(b, pos);
-    auto res = ev.evaluate(b, pos, env);
+        auto res = ev.evaluate(b, pos, env);
         // Store into runtime variable table
         toRuntimeValue(name, res.value);
         pos = res.nextPos;
@@ -989,5 +1143,148 @@ private:
         }
         
         return targetLine;
+    }
+
+    uint16_t doDIM(const std::vector<uint8_t>& b, size_t& pos) {
+        // DIM statement: DIM var(dim1[,dim2]...) [, var2(dim1[,dim2]...)]...
+        
+        while (!atEnd(b, pos)) {
+            skipSpaces(b, pos);
+            if (atEnd(b, pos) || b[pos] == ':') break;
+            
+            // Read variable name
+            auto varName = readIdentifier(b, pos);
+            if (varName.empty()) {
+                throw expr::BasicError(2, "Expected variable name in DIM", pos);
+            }
+            
+            skipSpaces(b, pos);
+            
+            // Expect opening parenthesis or bracket
+            if (atEnd(b, pos)) {
+                throw expr::BasicError(2, "Expected ( or [ after variable name in DIM", pos);
+            }
+            
+            char openBracket = '\0';
+            char closeBracket = '\0';
+            bool isTokenized = false;
+            
+            // Check for ASCII parentheses/brackets or tokenized parentheses
+            if (b[pos] == '(' || b[pos] == '[') {
+                openBracket = static_cast<char>(b[pos]);
+                closeBracket = (openBracket == '(') ? ')' : ']';
+                isTokenized = false;
+                ++pos; // consume opening bracket
+            } else if (b[pos] == 0xf3) {  // tokenized left parenthesis
+                openBracket = '(';
+                closeBracket = ')';
+                isTokenized = true;
+                ++pos; // consume opening bracket token
+            } else {
+                throw expr::BasicError(2, "Expected ( or [ after variable name in DIM", pos);
+            }
+            
+            // Parse dimension list
+            std::vector<int16_t> dimensions;
+            
+            // Define a lambda to check for closing bracket
+            auto isClosingBracket = [&](uint8_t ch) -> bool {
+                if (!isTokenized) {
+                    // We started with ASCII, expect ASCII closing
+                    return ch == closeBracket;
+                } else {
+                    // We started with tokenized parenthesis, expect tokenized closing
+                    return ch == 0xf4; // tokenized right parenthesis
+                }
+            };
+            
+            while (!atEnd(b, pos) && !isClosingBracket(b[pos])) {
+                skipSpaces(b, pos);
+                if (atEnd(b, pos)) {
+                    throw expr::BasicError(2, "Missing closing bracket in DIM", pos);
+                }
+                
+                // Evaluate dimension expression
+                auto res = ev.evaluate(b, pos, env);
+                pos = res.nextPos;
+                
+                int16_t dimSize = expr::ExpressionEvaluator::toInt16(res.value);
+                if (dimSize < 0) {
+                    throw expr::BasicError(5, "Illegal function call: negative dimension", pos);
+                }
+                
+                dimensions.push_back(dimSize);
+                
+                skipSpaces(b, pos);
+                
+                // Check for comma (more dimensions)
+                if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) { // 0xF5 is tokenized comma
+                    ++pos; // consume comma
+                    continue;
+                }
+                
+                // Should be at closing bracket
+                break;
+            }
+            
+            // Expect closing bracket
+            bool found_closing_bracket = false;
+            if (!isTokenized) {
+                // We started with ASCII, expect ASCII closing
+                if (!atEnd(b, pos) && b[pos] == closeBracket) {
+                    found_closing_bracket = true;
+                    ++pos;
+                }
+            } else {
+                // We started with tokenized parenthesis, expect tokenized closing
+                if (!atEnd(b, pos) && b[pos] == 0xf4) { // tokenized right parenthesis
+                    found_closing_bracket = true;
+                    ++pos;
+                }
+            }
+            
+            if (!found_closing_bracket) {
+                throw expr::BasicError(2, "Missing closing bracket in DIM", pos);
+            }
+            
+            if (dimensions.empty()) {
+                throw expr::BasicError(2, "Empty dimension list in DIM", pos);
+            }
+            
+            // Determine array type from variable name suffix or DEFTBL
+            gwbasic::ScalarType arrayType;
+            char suffix = '\0';
+            if (!varName.empty()) {
+                char last = varName.back();
+                if (last == '%' || last == '!' || last == '#' || last == '$') {
+                    suffix = last;
+                }
+            }
+            
+            if (suffix) {
+                arrayType = gwbasic::typeFromSuffix(suffix);
+            } else {
+                char firstChar = varName.empty() ? 'A' : varName[0];
+                arrayType = deftbl.getDefaultFor(firstChar);
+            }
+            
+            // Create the array
+            if (!vars.createArray(varName, arrayType, dimensions)) {
+                throw expr::BasicError(10, "Duplicate definition or out of memory", pos);
+            }
+            
+            skipSpaces(b, pos);
+            
+            // Check for comma (more arrays)
+            if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) { // 0xF5 is tokenized comma
+                ++pos; // consume comma
+                continue;
+            }
+            
+            // End of DIM statement
+            break;
+        }
+        
+        return 0;
     }
 };

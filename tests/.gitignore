@@ -1,2 +1,4 @@
 test_runtime_stack
 test_variable_table
+test_array_manager
+test_string_heap

@@ -1,6 +1,6 @@
 # Source directory Makefile
 
-SUBDIRS = Tokenizer ProgramStore InterpreterLoop ExpressionEvaluator NumericEngine
+SUBDIRS = Tokenizer ProgramStore InterpreterLoop ExpressionEvaluator NumericEngine Runtime
 
 # Main GW-BASIC executable
 bin_PROGRAMS = gw-basic
@@ -14,4 +14,5 @@ gw_basic_LDADD = \
     $(srcdir)/Tokenizer/libtokenizer.la \
     $(srcdir)/ExpressionEvaluator/libexpressionevaluator.la \
     $(srcdir)/NumericEngine/libnumericengine.la \
+    $(srcdir)/Runtime/libruntime.la \
     $(SDL3_LIBS)

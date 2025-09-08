@@ -16,7 +16,8 @@ test_load_LDADD = $(top_builddir)/src/InterpreterLoop/libinterpreterloop.la \
                   $(top_builddir)/src/ProgramStore/libprogramstore.la \
                   $(top_builddir)/src/Tokenizer/libtokenizer.la \
                   $(top_builddir)/src/ExpressionEvaluator/libexpressionevaluator.la \
-                  $(top_builddir)/src/NumericEngine/libnumericengine.la
+                  $(top_builddir)/src/NumericEngine/libnumericengine.la \
+                  $(top_builddir)/src/Runtime/libruntime.la
 
 test_gosub_return_SOURCES = test_gosub_return.cpp
 test_gosub_return_LDADD = $(top_builddir)/src/InterpreterLoop/libinterpreterloop.la \
@@ -24,6 +25,7 @@ test_gosub_return_LDADD = $(top_builddir)/src/InterpreterLoop/libinterpreterloop
                           $(top_builddir)/src/Tokenizer/libtokenizer.la \
                           $(top_builddir)/src/ExpressionEvaluator/libexpressionevaluator.la \
                           $(top_builddir)/src/NumericEngine/libnumericengine.la \
+                          $(top_builddir)/src/Runtime/libruntime.la \
                           -lCatch2Main -lCatch2
 
 # Mark these as manual tests since they require example files
