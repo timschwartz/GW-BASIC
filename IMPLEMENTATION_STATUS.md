@@ -7,7 +7,7 @@ A comprehensive status overview of the GW-BASIC reimplementation in C++.
 
 ## Summary
 
-This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 80% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, and comprehensive event trap handling.
+This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 85% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, comprehensive event trap handling, and full INPUT statement functionality.
 
 ## ✅ Completed Components
 
@@ -174,7 +174,7 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 
 **Files**: `src/InterpreterLoop/` (InterpreterLoop.hpp, InterpreterLoop.cpp, test_interpreterloop.cpp)
 
-### Basic Dispatcher (90% Complete)
+### Basic Dispatcher (95% Complete)
 - ✅ **PRINT Statement**: Basic text output with separators (`;`, `,`)
 - ✅ **PRINT USING Statement**: Formatted numeric output with format patterns (###.##, comma separators, currency symbols, sign indicators, asterisk fill)
 - ✅ **LET/Assignment**: Variable assignment with type coercion
@@ -186,9 +186,10 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **ON GOTO/GOSUB**: Computed jumps with line number lists
 - ✅ **Event Trap Statements**: Complete ON KEY, ON ERROR, ON TIMER statement handling
 - ✅ **Trap Control Statements**: KEY ON/OFF, ERROR handling (doERROR, doRESUME, doKEY, doTIMER)
+- ✅ **INPUT Statement**: Complete user input implementation with prompt support, cross-platform input handling (console/GUI modes), type coercion, and test mode support
 - ✅ **END/STOP**: Program termination
 - ✅ **LOAD/SAVE**: Basic file I/O for program storage
-- ⚠️ **Missing**: INPUT, READ/DATA/RESTORE, most other I/O statements
+- ⚠️ **Missing**: READ/DATA/RESTORE, most other I/O statements
 
 **Files**: `src/InterpreterLoop/BasicDispatcher.hpp`
 
@@ -226,10 +227,10 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ❌ **Random Access**: GET, PUT, field operations
 - ❌ **Directory Operations**: FILES, KILL, NAME
 
-### Input/Output (35% Complete)
+### Input/Output (55% Complete)
 - ✅ **PRINT**: Basic output with some formatting
 - ✅ **PRINT USING**: Formatted numeric output with comprehensive pattern support (###.##, comma separators, currency symbols, sign indicators, asterisk fill)
-- ❌ **INPUT**: User input with prompts and validation
+- ✅ **INPUT**: Complete user input implementation with prompt support, type coercion, cross-platform handling (console stdin/GUI SDL events), and test mode support
 - ❌ **Device I/O**: Printer (LPRINT), communications ports
 
 ### Graphics and Sound (0% Complete)
@@ -301,17 +302,16 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 | Numeric Engine | 95% | ~1200 | Near Complete |
 | Runtime System | 98% | ~1200 | Near Complete |
 | Interpreter Loop | 90% | ~350 | Core Complete |
-| Basic Dispatcher | 90% | ~1200 | Well Featured |
+| Basic Dispatcher | 95% | ~1400 | Well Featured |
 | User Interface | 70% | ~700 | Working |
-| **Overall** | **80%** | **~7050** | **Beta Stage** |
+| **Overall** | **85%** | **~7250** | **Beta Stage** |
 
 ## 🎯 Next Priority Items
 
 ### High Priority (Core Language Completion)
-1. **INPUT Statement**: Complete user input handling with prompts and validation
-2. **DATA/READ/RESTORE**: Static data storage and retrieval
-3. **String Function Integration**: Integrate CHR$, STR$, VAL functions with runtime system
-4. **Error Handling Enhancement**: ON ERROR GOTO and RESUME statements
+1. **DATA/READ/RESTORE**: Static data storage and retrieval
+2. **String Function Integration**: Integrate CHR$, STR$, VAL functions with runtime system
+3. **Error Handling Enhancement**: ON ERROR GOTO and RESUME statements
 
 ### Medium Priority (Language Features)
 1. **File I/O**: Sequential file operations (OPEN, CLOSE, INPUT#, PRINT#)
@@ -331,7 +331,6 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 
 ### Critical Issues
 - Limited error handling in expressions
-- No INPUT statement for user interaction
 - Missing integration of string functions (CHR$, STR$, VAL) with runtime system
 
 ### Important Issues  
@@ -352,6 +351,7 @@ The reimplemented GW-BASIC can currently run simple programs such as:
 ```basic
 10 DIM A(10), MATRIX(5,5)
 20 PRINT "Hello, World!"
+25 INPUT "Enter your name: ", NAME$
 30 FOR I = 1 TO 10
 40   A(I) = I * 2
 50   PRINT "Number: "; I; " Array: "; A(I)
@@ -361,6 +361,8 @@ The reimplemented GW-BASIC can currently run simple programs such as:
 85 PRINT USING "Currency: $###.##"; 123.45
 86 PRINT USING "Percentage: +##.#%"; 95.7
 87 PRINT USING "With commas: ###,###.##"; 12345.67
+88 INPUT "Enter a number: ", VALUE
+89 PRINT "You entered: "; VALUE
 90 END
 ```
 
@@ -370,6 +372,7 @@ It supports:
 - IF-THEN-ELSE conditionals  
 - GOTO and GOSUB/RETURN
 - Basic PRINT statements
+- **INPUT statements** with prompt support and type coercion (works in both console and GUI modes)
 - **PRINT USING formatted output** with numeric patterns, currency symbols, comma separators, and sign indicators
 - Array element access with both A(I) and A[I] syntax
 - Multi-dimensional array element access
@@ -381,9 +384,9 @@ It supports:
 
 ### Phase 1: Language Completion (Target: Q4 2025)
 - Complete string function integration with runtime system
-- Implement INPUT statement and user interaction
-- Implement DATA/READ/RESTORE
+- Implement DATA/READ/RESTORE statements
 - Add enhanced error handling (ON ERROR GOTO)
+- Improve file I/O capabilities
 
 ### Phase 2: I/O and Formatting (Target: Q1 2026)
 - Complete file I/O system

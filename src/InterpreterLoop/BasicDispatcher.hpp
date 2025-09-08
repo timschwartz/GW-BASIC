@@ -35,9 +35,10 @@
 class BasicDispatcher {
 public:
     using PrintCallback = std::function<void(const std::string&)>;
+    using InputCallback = std::function<std::string(const std::string&)>; // prompt -> input
     
-    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr)
-        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), printCallback(printCb) {
+    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr)
+        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), printCallback(printCb), inputCallback(inputCb) {
         // Wire up cross-references
         vars.setStringHeap(&strHeap);
         vars.setArrayManager(&arrayManager);
@@ -115,6 +116,9 @@ public:
 
     // Access to event trap system
     gwbasic::EventTrapSystem* getEventTrapSystem() { return &eventTraps; }
+    
+    // Set test mode to avoid waiting for input
+    void setTestMode(bool enabled) { testMode = enabled; }
 
 private:
     std::shared_ptr<Tokenizer> tok;
@@ -130,7 +134,9 @@ private:
     gwbasic::EventTrapSystem eventTraps;
     expr::Env env;
     PrintCallback printCallback;
+    InputCallback inputCallback;
     uint16_t currentLine = 0; // Current line number being executed
+    bool testMode = false; // Set to true to avoid waiting for input in tests
 
     // Helpers to convert between runtime Value and evaluator Value
     static expr::Value toExprValue(const gwbasic::Value& v) {
@@ -222,6 +228,7 @@ private:
     std::string name = tok ? tok->getTokenName(t) : std::string{};
     
     if (name == "PRINT") return doPRINT(b, pos);
+    if (name == "INPUT") return doINPUT(b, pos);
     if (name == "LET") return handleLet(b, pos, /*implied*/false);
     if (name == "DIM") return doDIM(b, pos);
     if (name == "IF") return doIF(b, pos);
@@ -283,12 +290,11 @@ private:
         }
         if (newLine) output += "\n";
         
-        // Send output to callback if available, otherwise fall back to cout
+        // Send output to both callback and stdout
         if (printCallback) {
             printCallback(output);
-        } else {
-            std::cout << output;
         }
+        std::cout << output; // Always output to stdout as well
         
         return 0;
     }
@@ -386,12 +392,11 @@ private:
         
         if (newLine) output += "\n";
         
-        // Send output to callback if available, otherwise fall back to cout
+        // Send output to both callback and stdout
         if (printCallback) {
             printCallback(output);
-        } else {
-            std::cout << output;
         }
+        std::cout << output; // Always output to stdout as well
         
         return 0;
     }
@@ -1652,4 +1657,302 @@ private:
         
         return 0;
     }
+
+    uint16_t doINPUT(const std::vector<uint8_t>& b, size_t& pos) {
+        // INPUT statement implementation
+        // Syntax: INPUT [prompt$;] variable[,variable]...
+        // or: INPUT variable[,variable]...
+        
+        skipSpaces(b, pos);
+        
+        std::string prompt;
+        bool hasPrompt = false;
+        bool suppressNewline = false;
+        
+        // Check if there's a prompt string
+        if (!atEnd(b, pos)) {
+            // Check if we start with a string literal
+            if (b[pos] == '"') {
+                // Parse string literal directly
+                ++pos; // skip opening quote
+                while (!atEnd(b, pos) && b[pos] != '"') {
+                    prompt += static_cast<char>(b[pos++]);
+                }
+                if (!atEnd(b, pos) && b[pos] == '"') {
+                    ++pos; // skip closing quote
+                    hasPrompt = true;
+                    
+                    skipSpaces(b, pos);
+                    
+                    // Check for separator after prompt
+                    if (!atEnd(b, pos) && (b[pos] == ';' || b[pos] == 0xF6 || b[pos] == ',' || b[pos] == 0xF5)) {
+                        // Check separator type
+                        if (b[pos] == ';' || b[pos] == 0xF6) {
+                            suppressNewline = true; // Semicolon suppresses newline
+                        }
+                        ++pos; // consume separator
+                    }
+                }
+            } else {
+                // Save current position to backtrack if needed
+                auto savePos = pos;
+                
+                // Try to evaluate an expression - if it's a string, it might be a prompt
+                try {
+                    auto res = ev.evaluate(b, pos, env);
+                    
+                    // Check what follows the expression
+                    skipSpaces(b, pos);
+                    
+                    // If followed by semicolon or comma, this is a prompt
+                    if (!atEnd(b, pos) && (b[pos] == ';' || b[pos] == 0xF6 || b[pos] == ',' || b[pos] == 0xF5)) {
+                        // This is a prompt
+                        std::visit([&](auto&& x) {
+                            using T = std::decay_t<decltype(x)>;
+                            if constexpr (std::is_same_v<T, expr::Str>) {
+                                prompt = x.v;
+                                hasPrompt = true;
+                            } else {
+                                // Convert numeric to string for prompt
+                                if constexpr (std::is_same_v<T, expr::Int16>) prompt = std::to_string(x.v);
+                                else if constexpr (std::is_same_v<T, expr::Single>) prompt = std::to_string(x.v);
+                                else if constexpr (std::is_same_v<T, expr::Double>) prompt = std::to_string(x.v);
+                                hasPrompt = true;
+                            }
+                        }, res.value);
+                        
+                        // Check separator type
+                        if (b[pos] == ';' || b[pos] == 0xF6) {
+                            suppressNewline = true; // Semicolon suppresses newline
+                        }
+                        ++pos; // consume separator
+                    } else {
+                        // Not a prompt - backtrack and treat as first variable
+                        pos = savePos;
+                    }
+                } catch (...) {
+                    // Failed to evaluate - backtrack and continue with variables
+                    pos = savePos;
+                }
+            }
+        }
+        
+        // Display prompt if present
+        if (hasPrompt) {
+            if (printCallback) {
+                printCallback(prompt);
+                if (!suppressNewline) {
+                    printCallback(" ");
+                }
+            }
+            // Always output to stdout as well
+            std::cout << prompt;
+            if (!suppressNewline) {
+                std::cout << " ";
+            }
+        } else {
+            // Default prompt
+            if (printCallback) {
+                printCallback("? ");
+            }
+            // Always output to stdout as well
+            std::cout << "? ";
+        }
+        
+        // Get list of variables to read into
+        std::vector<std::string> variables;
+        
+        while (!atEnd(b, pos)) {
+            skipSpaces(b, pos);
+            if (atEnd(b, pos) || b[pos] == ':') break;
+            
+            auto varName = readIdentifier(b, pos);
+            if (varName.empty()) {
+                throw expr::BasicError(2, "Expected variable name in INPUT", pos);
+            }
+            
+            variables.push_back(varName);
+            
+            skipSpaces(b, pos);
+            
+            // Check for comma (more variables)
+            if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) { // 0xF5 is tokenized comma
+                ++pos; // consume comma
+                continue;
+            }
+            
+            // End of variable list
+            break;
+        }
+        
+        if (variables.empty()) {
+            throw expr::BasicError(2, "No variables specified in INPUT", pos);
+        }
+        
+        // For now, we'll implement a synchronous input approach
+        // In a real implementation, this would need to integrate with the event loop
+        std::string inputLine;
+        
+        // In test mode, use default values to avoid blocking
+        if (testMode) {
+            inputLine = "0"; // Default input for testing
+        } else if (inputCallback) {
+            // Use the input callback (GUI mode)
+            std::string fullPrompt;
+            if (hasPrompt) {
+                fullPrompt = prompt;
+                if (!suppressNewline) {
+                    fullPrompt += " ";
+                }
+            } else {
+                fullPrompt = "? ";
+            }
+            inputLine = inputCallback(fullPrompt);
+        } else {
+            // Fallback to stdin (console mode)
+            std::getline(std::cin, inputLine);
+        }
+        
+        // Parse the input and assign to variables
+        parseInputAndAssignVariables(inputLine, variables);
+        
+        return 0;
+    }
+
+private:
+    void parseInputAndAssignVariables(const std::string& inputLine, const std::vector<std::string>& variables) {
+        // Simple input parsing - split by commas and assign to variables
+        std::vector<std::string> values;
+        std::string current;
+        bool inQuotes = false;
+        
+        for (size_t i = 0; i < inputLine.length(); ++i) {
+            char ch = inputLine[i];
+            
+            if (ch == '"' && (i == 0 || inputLine[i-1] != '\\')) {
+                inQuotes = !inQuotes;
+                current += ch;
+            } else if (ch == ',' && !inQuotes) {
+                values.push_back(trim(current));
+                current.clear();
+            } else {
+                current += ch;
+            }
+        }
+        
+        if (!current.empty()) {
+            values.push_back(trim(current));
+        }
+        
+        // Assign values to variables
+        for (size_t i = 0; i < variables.size(); ++i) {
+            std::string value;
+            if (i < values.size()) {
+                value = values[i];
+            } else {
+                value = "0"; // Default value if not enough input
+            }
+            
+            // Determine variable type and assign
+            assignInputValue(variables[i], value);
+        }
+    }
+    
+    void assignInputValue(const std::string& varName, const std::string& value) {
+        // Get or create variable
+        gwbasic::VarSlot& slot = vars.getOrCreate(varName);
+        
+        try {
+            // Parse value based on variable type
+            switch (slot.scalar.type) {
+                case gwbasic::ScalarType::Int16: {
+                    // Try to parse as integer
+                    int32_t intVal = 0;
+                    if (!value.empty()) {
+                        try {
+                            intVal = std::stoi(value);
+                        } catch (...) {
+                            intVal = 0; // Default on parse error
+                        }
+                    }
+                    slot.scalar = gwbasic::Value::makeInt(static_cast<int16_t>(intVal));
+                    break;
+                }
+                
+                case gwbasic::ScalarType::Single: {
+                    // Try to parse as float
+                    float floatVal = 0.0f;
+                    if (!value.empty()) {
+                        try {
+                            floatVal = std::stof(value);
+                        } catch (...) {
+                            floatVal = 0.0f; // Default on parse error
+                        }
+                    }
+                    slot.scalar = gwbasic::Value::makeSingle(floatVal);
+                    break;
+                }
+                
+                case gwbasic::ScalarType::Double: {
+                    // Try to parse as double
+                    double doubleVal = 0.0;
+                    if (!value.empty()) {
+                        try {
+                            doubleVal = std::stod(value);
+                        } catch (...) {
+                            doubleVal = 0.0; // Default on parse error
+                        }
+                    }
+                    slot.scalar = gwbasic::Value::makeDouble(doubleVal);
+                    break;
+                }
+                
+                case gwbasic::ScalarType::String: {
+                    // Remove quotes if present
+                    std::string strVal = value;
+                    if (strVal.length() >= 2 && strVal.front() == '"' && strVal.back() == '"') {
+                        strVal = strVal.substr(1, strVal.length() - 2);
+                    }
+                    
+                    // Allocate string in runtime heap
+                    gwbasic::StrDesc sd{};
+                    if (!strHeap.allocCopy(reinterpret_cast<const uint8_t*>(strVal.data()), 
+                                          static_cast<uint16_t>(strVal.size()), sd)) {
+                        throw expr::BasicError(7, "Out of string space", 0);
+                    }
+                    slot.scalar = gwbasic::Value::makeString(sd);
+                    break;
+                }
+            }
+        } catch (const std::exception&) {
+            // On any error, assign default value
+            switch (slot.scalar.type) {
+                case gwbasic::ScalarType::Int16:
+                    slot.scalar = gwbasic::Value::makeInt(0);
+                    break;
+                case gwbasic::ScalarType::Single:
+                    slot.scalar = gwbasic::Value::makeSingle(0.0f);
+                    break;
+                case gwbasic::ScalarType::Double:
+                    slot.scalar = gwbasic::Value::makeDouble(0.0);
+                    break;
+                case gwbasic::ScalarType::String: {
+                    gwbasic::StrDesc sd{};
+                    strHeap.allocCopy(nullptr, 0, sd); // Empty string
+                    slot.scalar = gwbasic::Value::makeString(sd);
+                    break;
+                }
+            }
+        }
+    }
+    
+    // Utility function to trim whitespace
+    std::string trim(const std::string& str) {
+        size_t start = str.find_first_not_of(" \t\r\n");
+        if (start == std::string::npos) return "";
+        size_t end = str.find_last_not_of(" \t\r\n");
+        return str.substr(start, end - start + 1);
+    }
+
+public:
 };

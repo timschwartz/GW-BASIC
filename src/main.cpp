@@ -7,6 +7,8 @@
 #include <sstream>
 #include <iomanip>
 #include <cctype>
+#include <algorithm>
+#include <unistd.h> // for isatty
 
 // GW-BASIC components
 #include "Tokenizer/Tokenizer.hpp"
@@ -69,11 +71,15 @@ private:
     // State
     bool running;
     bool programMode;  // true = accepting program lines, false = immediate mode
+    bool waitingForInput;  // true when INPUT statement is waiting for user input
+    std::string inputPrompt;  // prompt to show when waiting for input
+    std::string pendingInput; // input being typed by user during INPUT
     
 public:
     GWBasicShell() : window(nullptr), renderer(nullptr), fontTexture(nullptr),
                      cursorX(0), cursorY(0), cursorVisible(true), lastCursorBlink(0),
-                     historyIndex(0), insertMode(true), running(true), programMode(false) {
+                     historyIndex(0), insertMode(true), running(true), programMode(false),
+                     waitingForInput(false) {
         
         // Initialize screen buffer
         clearScreen();
@@ -83,9 +89,10 @@ public:
         programStore = std::make_shared<ProgramStore>();
         interpreter = std::make_shared<InterpreterLoop>(programStore, tokenizer);
         
-        // Create dispatcher with print callback to redirect output to SDL window
+        // Create dispatcher with print and input callbacks
         dispatcher = std::make_unique<BasicDispatcher>(tokenizer, programStore,
-            [this](const std::string& text) { print(text); });
+            [this](const std::string& text) { print(text); },
+            [this](const std::string& prompt) -> std::string { return getInput(prompt); });
         
         // Connect event trap system between interpreter and dispatcher
         interpreter->setEventTrapSystem(dispatcher->getEventTrapSystem());
@@ -241,6 +248,40 @@ public:
             // Cap framerate
             SDL_Delay(16); // ~60 FPS
         }
+    }
+    
+    // Get input from the GUI (for INPUT statements)
+    std::string getInput(const std::string& prompt) {
+        // Show the prompt
+        print(prompt);
+        
+        // Set up for input mode
+        waitingForInput = true;
+        inputPrompt = prompt;
+        pendingInput.clear();
+        
+        // Run the event loop until we get input
+        SDL_Event event;
+        while (waitingForInput && running) {
+            while (SDL_PollEvent(&event)) {
+                handleEvent(event);
+            }
+            
+            // Update cursor blink
+            uint32_t now = SDL_GetTicks();
+            if (now - lastCursorBlink > 500) {
+                cursorVisible = !cursorVisible;
+                lastCursorBlink = now;
+            }
+            
+            // Render
+            render();
+            
+            // Cap framerate
+            SDL_Delay(16); // ~60 FPS
+        }
+        
+        return pendingInput;
     }
     
 private:
@@ -483,14 +524,30 @@ private:
     }
     
     void handleCharInput(char ch) {
-        inputLine += ch;
-        printChar(ch);
+        if (waitingForInput) {
+            // During INPUT statement
+            pendingInput += ch;
+            printChar(ch);
+        } else {
+            // Regular command input
+            inputLine += ch;
+            printChar(ch);
+        }
     }
     
     void handleBackspace() {
-        if (!inputLine.empty()) {
-            inputLine.pop_back();
-            printChar('\b');
+        if (waitingForInput) {
+            // During INPUT statement
+            if (!pendingInput.empty()) {
+                pendingInput.pop_back();
+                printChar('\b');
+            }
+        } else {
+            // Regular command input
+            if (!inputLine.empty()) {
+                inputLine.pop_back();
+                printChar('\b');
+            }
         }
     }
     
@@ -502,6 +559,13 @@ private:
     void handleEnter() {
         print("\n");
         
+        if (waitingForInput) {
+            // During INPUT statement - finish input
+            waitingForInput = false;
+            return;
+        }
+        
+        // Regular command input
         if (inputLine.empty()) {
             showPrompt();
             return;
@@ -795,6 +859,160 @@ private:
     }
 };
 
+// Console-only mode for piped input
+int runConsoleMode(int argc, char* argv[]) {
+    // Initialize GW-BASIC components
+    auto tokenizer = std::make_shared<Tokenizer>();
+    auto programStore = std::make_shared<ProgramStore>();
+    auto dispatcher = std::make_unique<BasicDispatcher>(tokenizer, programStore, nullptr, nullptr);
+    
+    std::cout << "GW-BASIC Interpreter v0.1\n";
+    std::cout << "Copyright (C) 2025\n";
+    std::cout << "32768 Bytes free\n";
+    std::cout << "\n";
+    
+    // If filename argument provided, load it first
+    if (argc > 1) {
+        std::string filename = argv[1];
+        std::ifstream file(filename);
+        if (file.is_open()) {
+            std::string line;
+            int linesLoaded = 0;
+            while (std::getline(file, line)) {
+                if (line.empty()) continue;
+                
+                // Parse line number if present
+                std::istringstream iss(line);
+                std::string token;
+                iss >> token;
+                
+                if (std::isdigit(token[0])) {
+                    try {
+                        uint16_t lineNum = static_cast<uint16_t>(std::stoul(token));
+                        std::string restOfLine;
+                        std::getline(iss, restOfLine);
+                        if (!restOfLine.empty() && restOfLine[0] == ' ') {
+                            restOfLine = restOfLine.substr(1);
+                        }
+                        
+                        if (!restOfLine.empty()) {
+                            auto tokens = tokenizer->crunch(restOfLine);
+                            programStore->insertLine(lineNum, tokens);
+                            linesLoaded++;
+                        }
+                    } catch (const std::exception& e) {
+                        std::cout << "?Syntax error in line: " << e.what() << "\n";
+                    }
+                }
+            }
+            file.close();
+            std::cout << "Loaded " << linesLoaded << " lines from " << filename << "\n";
+        }
+    }
+    
+    // Process stdin line by line
+    std::string inputLine;
+    while (std::getline(std::cin, inputLine)) {
+        if (inputLine.empty()) continue;
+        
+        // Trim whitespace
+        size_t start = inputLine.find_first_not_of(" \t\r\n");
+        if (start == std::string::npos) continue;
+        size_t end = inputLine.find_last_not_of(" \t\r\n");
+        inputLine = inputLine.substr(start, end - start + 1);
+        
+        // Check if this is a program line (starts with number)
+        if (std::isdigit(inputLine[0])) {
+            // Parse line number
+            size_t pos = 0;
+            int lineNumber = 0;
+            while (pos < inputLine.length() && std::isdigit(inputLine[pos])) {
+                lineNumber = lineNumber * 10 + (inputLine[pos] - '0');
+                pos++;
+            }
+            
+            // Skip whitespace
+            while (pos < inputLine.length() && std::isspace(inputLine[pos])) {
+                pos++;
+            }
+            
+            std::string statement = inputLine.substr(pos);
+            if (statement.empty()) {
+                programStore->deleteLine(static_cast<uint16_t>(lineNumber));
+            } else {
+                try {
+                    auto tokens = tokenizer->crunch(statement);
+                    programStore->insertLine(static_cast<uint16_t>(lineNumber), tokens);
+                } catch (const std::exception& e) {
+                    std::cout << "?Syntax error\n";
+                }
+            }
+        } else {
+            // Immediate command
+            std::string upperInput = inputLine;
+            std::transform(upperInput.begin(), upperInput.end(), upperInput.begin(), ::toupper);
+            
+            if (upperInput == "LIST") {
+                if (programStore->isEmpty()) {
+                    std::cout << "Ok\n";
+                } else {
+                    for (auto it = programStore->begin(); it != programStore->end(); ++it) {
+                        std::cout << it->lineNumber << " ";
+                        try {
+                            std::string detokenized = tokenizer->detokenize(it->tokens);
+                            std::cout << detokenized << "\n";
+                        } catch (const std::exception&) {
+                            std::cout << "?Syntax error\n";
+                        }
+                    }
+                }
+            } else if (upperInput == "RUN") {
+                if (programStore->isEmpty()) {
+                    std::cout << "?Illegal function call\n";
+                } else {
+                    // Execute program line by line
+                    try {
+                        auto it = programStore->begin();
+                        while (it != programStore->end()) {
+                            auto result = (*dispatcher)(it->tokens, it->lineNumber);
+                            if (result == 0xFFFF) {
+                                // END/STOP encountered
+                                break;
+                            } else if (result != 0) {
+                                // Jump to line number - find it
+                                auto jumpIt = programStore->findLine(result);
+                                if (jumpIt.isValid()) {
+                                    it = jumpIt;
+                                } else {
+                                    std::cout << "?Undefined line number " << result << "\n";
+                                    break;
+                                }
+                            } else {
+                                ++it;
+                            }
+                        }
+                    } catch (const std::exception& e) {
+                        std::cout << "?Runtime error: " << e.what() << "\n";
+                    }
+                }
+            } else if (upperInput == "NEW" || upperInput == "CLEAR") {
+                programStore->clear();
+                std::cout << "Ok\n";
+            } else {
+                // Execute as immediate statement
+                try {
+                    auto tokens = tokenizer->crunch(inputLine);
+                    (*dispatcher)(tokens);
+                } catch (const std::exception& e) {
+                    std::cout << "?ERROR: " << e.what() << "\n";
+                }
+            }
+        }
+    }
+    
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     // Show usage if help is requested
     if (argc > 1 && (std::string(argv[1]) == "--help" || std::string(argv[1]) == "-h")) {
@@ -804,8 +1022,12 @@ int main(int argc, char* argv[]) {
         std::cout << "If a filename is provided, it will be loaded automatically at startup.\n";
         std::cout << "The file should contain BASIC program lines with line numbers.\n";
         std::cout << "\n";
-        std::cout << "Example:\n";
-        std::cout << "  " << argv[0] << " program.bas\n";
+        std::cout << "When input is piped, the interpreter runs in console mode.\n";
+        std::cout << "Otherwise, it runs in GUI mode with SDL3.\n";
+        std::cout << "\n";
+        std::cout << "Examples:\n";
+        std::cout << "  " << argv[0] << " program.bas          # GUI mode\n";
+        std::cout << "  echo 'PRINT \"Hi\"' | " << argv[0] << "    # Console mode\n";
         std::cout << "\n";
         std::cout << "Interactive commands:\n";
         std::cout << "  LIST      - List the current program\n";
@@ -817,6 +1039,15 @@ int main(int argc, char* argv[]) {
         return 0;
     }
     
+    // Check if stdin is a terminal (interactive) or piped
+    bool isInputPiped = !isatty(STDIN_FILENO);
+    
+    if (isInputPiped) {
+        // Run in console mode for piped input
+        return runConsoleMode(argc, argv);
+    }
+    
+    // Run in GUI mode for interactive use
     GWBasicShell shell;
     
     if (!shell.initialize()) {
