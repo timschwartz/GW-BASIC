@@ -1,0 +1,6 @@
+10 READ A, B, C$
+20 DATA 42, 3.14, "Hello"
+30 PRINT A
+40 PRINT B  
+50 PRINT C$
+60 END

@@ -1997,13 +1997,6 @@ private:
     uint16_t doREAD(const std::vector<uint8_t>& b, size_t& pos) {
         // READ variable[,variable]...
         
-        std::cerr << "DEBUG: doREAD() - starting, pos=" << pos << ", line has " << b.size() << " bytes" << std::endl;
-        std::cerr << "DEBUG: doREAD() - tokens from pos:";
-        for (size_t i = pos; i < b.size() && i < pos + 10; ++i) {
-            std::cerr << " 0x" << std::hex << static_cast<int>(b[i]) << std::dec;
-        }
-        std::cerr << std::endl;
-        
         std::vector<std::string> variables;
         
         // Parse list of variables
@@ -2036,16 +2029,13 @@ private:
         
         // Read values from DATA statements and assign to variables
         for (const auto& varName : variables) {
-            std::cerr << "DEBUG: doREAD() - reading value for variable: " << varName << std::endl;
             gwbasic::Value value;
             if (!dataManager.readValue(value)) {
                 throwBasicError(4, "Out of DATA", pos);
             }
             
-            std::cerr << "DEBUG: doREAD() - value read, calling assignDataValue" << std::endl;
             // Assign the value to the variable
             assignDataValue(varName, value);
-            std::cerr << "DEBUG: doREAD() - assignDataValue returned successfully" << std::endl;
         }
         
         // Skip any trailing spaces or null bytes
@@ -2053,12 +2043,6 @@ private:
             ++pos;
         }
         
-        std::cerr << "DEBUG: doREAD() - all variables processed, returning, final pos=" << pos << std::endl;
-        std::cerr << "DEBUG: doREAD() - remaining bytes:";
-        for (size_t i = pos; i < b.size(); ++i) {
-            std::cerr << " 0x" << std::hex << static_cast<int>(b[i]) << std::dec;
-        }
-        std::cerr << std::endl;
         return 0;
     }
     
@@ -2134,11 +2118,8 @@ private:
 private:
     // Helper method to assign a data value to a variable
     void assignDataValue(const std::string& varName, const gwbasic::Value& value) {
-        std::cerr << "DEBUG: assignDataValue() called for variable '" << varName << "'" << std::endl;
-        
         // Get or create variable
         gwbasic::VarSlot& slot = vars.getOrCreate(varName);
-        std::cerr << "DEBUG: assignDataValue() - variable type: " << static_cast<int>(slot.scalar.type) << std::endl;
         
         // Convert the data value to the appropriate type for the variable
         switch (slot.scalar.type) {
@@ -2166,7 +2147,6 @@ private:
                     }
                 }
                 slot.scalar = gwbasic::Value::makeInt(intVal);
-                std::cerr << "DEBUG: assignDataValue() - assigned int value: " << intVal << std::endl;
                 break;
             }
             
@@ -2260,7 +2240,6 @@ private:
                 break;
             }
         }
-        std::cerr << "DEBUG: assignDataValue() - assignment complete" << std::endl;
     }
 
 public:

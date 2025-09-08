@@ -23,27 +23,21 @@ void DataManager::setTokenizer(std::shared_ptr<::Tokenizer> tokenizer) {
 }
 
 void DataManager::restore() {
-    std::cerr << "DEBUG: restore() called" << std::endl;
     dataPos = DataPosition{}; // Reset to invalid position
     
     if (!prog) {
-        std::cerr << "DEBUG: restore() - no prog" << std::endl;
         return;
     }
     
     // Start from the beginning of the program
     auto it = prog->begin();
     if (it != prog->end()) {
-        std::cerr << "DEBUG: restore() - found program, first line " << it->lineNumber << std::endl;
         dataPos.lineNumber = it->lineNumber;
         dataPos.tokenIndex = 0;
         dataPos.valid = true;
         
         // Find the first DATA statement
-        std::cerr << "DEBUG: restore() - calling findNextDataStatement" << std::endl;
         findNextDataStatement();
-    } else {
-        std::cerr << "DEBUG: restore() - empty program" << std::endl;
     }
 }
 
@@ -72,32 +66,22 @@ void DataManager::restore(uint16_t lineNumber) {
 }
 
 bool DataManager::readValue(Value& result) {
-    std::cerr << "DEBUG: readValue() called, valid=" << dataPos.valid << std::endl;
-    
     if (!prog || !tok) {
-        std::cerr << "DEBUG: readValue() - no prog or tok" << std::endl;
         return false;
     }
     
     // If we don't have a valid position, try to find the first DATA statement
     if (!dataPos.valid) {
-        std::cerr << "DEBUG: readValue() - invalid position, calling restore()" << std::endl;
         restore();
         if (!dataPos.valid) {
-            std::cerr << "DEBUG: readValue() - still no valid position after restore" << std::endl;
             return false;
         }
     }
     
-    std::cerr << "DEBUG: readValue() - trying parseNextValue at line " << dataPos.lineNumber << std::endl;
-    
     // Parse the next value from current DATA statement
     if (parseNextValue(result)) {
-        std::cerr << "DEBUG: readValue() - parseNextValue succeeded" << std::endl;
         return true;
     }
-    
-    std::cerr << "DEBUG: readValue() - parseNextValue failed, trying findNextDataStatement" << std::endl;
     
     // No more values in current DATA statement, find next one
     if (findNextDataStatement()) {
@@ -122,50 +106,26 @@ uint16_t DataManager::getCurrentDataLine() const {
 
 bool DataManager::findNextDataStatement() {
     if (!prog || !tok || !dataPos.valid) {
-        std::cerr << "DEBUG: findNextDataStatement() - early return: prog=" << (prog ? "ok" : "null") 
-                  << " tok=" << (tok ? "ok" : "null") 
-                  << " valid=" << dataPos.valid << std::endl;
         return false;
     }
     
     // Start from current position and look for DATA statements
     auto it = prog->findLine(dataPos.lineNumber);
     if (!it.isValid()) {
-        std::cerr << "DEBUG: findNextDataStatement() - line " << dataPos.lineNumber << " not found" << std::endl;
         dataPos.valid = false;
         return false;
     }
     
-    std::cerr << "DEBUG: findNextDataStatement() - searching from line " << dataPos.lineNumber 
-              << " token " << dataPos.tokenIndex << std::endl;
-    
     // Search current line and subsequent lines for DATA statements
     while (it.isValid()) {
         const auto& tokens = it->tokens;
-        std::cerr << "DEBUG: checking line " << it->lineNumber << " with " << tokens.size() << " tokens" << std::endl;
-        
-        // Debug: dump all tokens for line 10 (our DATA line)
-        if (it->lineNumber == 10) {
-            std::cerr << "DEBUG: Line 10 all tokens: ";
-            for (size_t i = 0; i < tokens.size(); ++i) {
-                std::cerr << "[" << i << "]=0x" << std::hex << static_cast<int>(tokens[i]) << std::dec;
-                if (tokens[i] >= 32 && tokens[i] <= 126) {
-                    std::cerr << "('" << static_cast<char>(tokens[i]) << "')";
-                }
-                std::cerr << " ";
-            }
-            std::cerr << std::endl;
-        }
         
         // Look for DATA token in this line
         for (size_t i = (it->lineNumber == dataPos.lineNumber ? dataPos.tokenIndex : 0); 
              i < tokens.size(); ++i) {
             
-            std::cerr << "DEBUG: token[" << i << "] = 0x" << std::hex << (int)tokens[i] << std::dec << std::endl;
-            
             if (tokens[i] == tok->getTokenValue("DATA")) {
                 // Found DATA statement
-                std::cerr << "DEBUG: Found DATA token at line " << it->lineNumber << " token " << i << std::endl;
                 dataPos.lineNumber = it->lineNumber;
                 dataPos.tokenIndex = i + 1; // Position after DATA token
                 dataPos.valid = true;
@@ -179,7 +139,6 @@ bool DataManager::findNextDataStatement() {
     }
     
     // No more DATA statements found
-    std::cerr << "DEBUG: No DATA statements found" << std::endl;
     dataPos.valid = false;
     return false;
 }
@@ -228,28 +187,18 @@ bool DataManager::parseNextValue(Value& result) {
 }
 
 void DataManager::skipToNextValue() {
-    std::cerr << "DEBUG: skipToNextValue() - current pos=" << dataPos.tokenIndex << std::endl;
-    
     if (!prog || !dataPos.valid) {
-        std::cerr << "DEBUG: skipToNextValue() - invalid state" << std::endl;
         return;
     }
     
     auto it = prog->findLine(dataPos.lineNumber);
     if (!it.isValid()) {
-        std::cerr << "DEBUG: skipToNextValue() - invalid line" << std::endl;
         dataPos.valid = false;
         return;
     }
     
     const auto& tokens = it->tokens;
     size_t pos = dataPos.tokenIndex;
-    
-    std::cerr << "DEBUG: skipToNextValue() - scanning from pos " << pos << ", tokens:";
-    for (size_t i = pos; i < tokens.size() && i < pos + 5; ++i) {
-        std::cerr << " 0x" << std::hex << static_cast<int>(tokens[i]) << std::dec;
-    }
-    std::cerr << std::endl;
     
     // Skip to next comma or end of statement
     while (pos < tokens.size() && 
@@ -260,35 +209,24 @@ void DataManager::skipToNextValue() {
     
     // If we found a comma, move past it
     if (pos < tokens.size() && (tokens[pos] == ',' || tokens[pos] == 0xF5)) {
-        std::cerr << "DEBUG: skipToNextValue() - found comma at pos " << pos << std::endl;
         ++pos;
     }
     
-    std::cerr << "DEBUG: skipToNextValue() - final pos=" << pos << std::endl;
     dataPos.tokenIndex = pos;
 }
 
 bool DataManager::parseTokenValue(const std::vector<uint8_t>& tokens, size_t& pos, Value& result) {
-    std::cerr << "DEBUG: parseTokenValue() - pos=" << pos << ", tokens.size()=" << tokens.size() << std::endl;
-    
     if (pos >= tokens.size()) {
-        std::cerr << "DEBUG: parseTokenValue() - pos >= tokens.size()" << std::endl;
         return false;
     }
     
     skipWhitespace(tokens, pos);
     
     if (pos >= tokens.size()) {
-        std::cerr << "DEBUG: parseTokenValue() - pos >= tokens.size() after skipWhitespace" << std::endl;
         return false;
     }
     
     uint8_t token = tokens[pos];
-    std::cerr << "DEBUG: parseTokenValue() - token=0x" << std::hex << static_cast<int>(token) << std::dec;
-    if (token >= 32 && token <= 126) {
-        std::cerr << " ('" << static_cast<char>(token) << "')";
-    }
-    std::cerr << std::endl;
     
     // Handle different token types
     if (token == '"') {
@@ -322,8 +260,8 @@ bool DataManager::parseTokenValue(const std::vector<uint8_t>& tokens, size_t& po
             return true;
         }
         
-    } else if (token == 0x1C) {
-        // Tokenized single-precision constant
+    } else if (token == 0x1D) {
+        // Tokenized single-precision constant (4 bytes)
         if (pos + 4 < tokens.size()) {
             // Extract 4-byte float from tokens
             union {
@@ -340,8 +278,8 @@ bool DataManager::parseTokenValue(const std::vector<uint8_t>& tokens, size_t& po
             return true;
         }
         
-    } else if (token == 0x1D) {
-        // Tokenized double-precision constant
+    } else if (token == 0x1F) {
+        // Tokenized double-precision constant (8 bytes)
         if (pos + 8 < tokens.size()) {
             // Extract 8-byte double from tokens
             union {
@@ -447,7 +385,6 @@ bool DataManager::parseTokenValue(const std::vector<uint8_t>& tokens, size_t& po
     }
     
     // Unknown token type - skip it
-    std::cerr << "DEBUG: parseTokenValue() - unknown token type, returning false" << std::endl;
     ++pos;
     return false;
 }
