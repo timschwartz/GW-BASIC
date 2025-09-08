@@ -1,5 +1,7 @@
 Read docs/reimplementation_guide.md and docs/architecture_map.md when deciding what to work on.
 
+After implementing a new feature, update IMPLEMENTATION_STATUS.md.
+
 Always ask for permission before making changes you weren't explicitly asked to make.
 
 Write C++20 compatible code.
