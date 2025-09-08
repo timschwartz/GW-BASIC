@@ -1,4 +1,5 @@
 #include "NumericEngine.hpp"
+#include "MBFFormat.hpp"
 
 #include <cmath>
 #include <cstring>
@@ -332,9 +333,14 @@ std::string NumericEngine::formatNumber(const NumericValue& value, const FormatO
             if (options.signAlways && x.v >= 0) oss << "+";
             oss << x.v;
             return oss.str();
+        } else if constexpr (std::is_same_v<T, Single>) {
+            // Use MBF-aware formatting for single precision
+            auto mbf32 = convertToMBF32(x.v);
+            return formatMBFValue(mbf32);
         } else {
-            double val = (std::is_same_v<T, Single>) ? x.v : x.v;
-            return formatFloatGWStyle(val, options);
+            // Use MBF-aware formatting for double precision
+            auto mbf64 = convertToMBF64(x.v);
+            return formatMBFValue(mbf64);
         }
     }, value);
 }
@@ -461,24 +467,89 @@ std::string NumericEngine::formatExponential(double value, const FormatOptions& 
 }
 
 // Placeholder implementations for MBF conversion (would need actual MBF format implementation)
-float NumericEngine::convertToMBFSingle(float ieee754) {
-    // TODO: Implement actual MBF conversion
-    return ieee754;
+MBF::MBF32 NumericEngine::convertToMBF32(float ieee754) {
+    return MBF::ieeeToMBF32(ieee754);
 }
 
-double NumericEngine::convertToMBFDouble(double ieee754) {
-    // TODO: Implement actual MBF conversion
-    return ieee754;
+MBF::MBF64 NumericEngine::convertToMBF64(double ieee754) {
+    return MBF::ieeeToMBF64(ieee754);
 }
 
-float NumericEngine::convertFromMBFSingle(float mbf) {
-    // TODO: Implement actual MBF conversion
-    return mbf;
+float NumericEngine::convertFromMBF32(const MBF::MBF32& mbf) {
+    return MBF::mbf32ToIEEE(mbf);
 }
 
-double NumericEngine::convertFromMBFDouble(double mbf) {
-    // TODO: Implement actual MBF conversion
-    return mbf;
+double NumericEngine::convertFromMBF64(const MBF::MBF64& mbf) {
+    return MBF::mbf64ToIEEE(mbf);
+}
+
+MBF::MBF32 NumericEngine::roundToMBF32Precision(const MBF::MBF64& value) {
+    return MBF::roundToMBF32(value);
+}
+
+std::string NumericEngine::formatMBFValue(const MBF::MBF32& value) {
+    return MBF::formatMBF32(value);
+}
+
+std::string NumericEngine::formatMBFValue(const MBF::MBF64& value) {
+    return MBF::formatMBF64(value);
+}
+
+MBF::MBF32 NumericEngine::parseMBF32FromString(const std::string& str) {
+    return MBF::parseNumberToMBF32(str);
+}
+
+MBF::MBF64 NumericEngine::parseMBF64FromString(const std::string& str) {
+    return MBF::parseNumberToMBF64(str);
+}
+
+NumericResult<NumericValue> NumericEngine::parseNumber(const std::string& str, bool forceDouble) {
+    if (str.empty()) {
+        return {NumericValue{Int16{0}}, NumericError::None};
+    }
+    
+    // Check for type suffix
+    std::string cleanStr = str;
+    bool hasIntegerSuffix = false;
+    bool hasSingleSuffix = false;
+    bool hasDoubleSuffix = false;
+    
+    if (!cleanStr.empty()) {
+        char lastChar = cleanStr.back();
+        if (lastChar == '%') {
+            hasIntegerSuffix = true;
+            cleanStr.pop_back();
+        } else if (lastChar == '!') {
+            hasSingleSuffix = true;
+            cleanStr.pop_back();
+        } else if (lastChar == '#') {
+            hasDoubleSuffix = true;
+            cleanStr.pop_back();
+        }
+    }
+    
+    try {
+        if (hasIntegerSuffix) {
+            // Force integer type
+            double val = std::stod(cleanStr);
+            if (val < -32768.0 || val > 32767.0) {
+                return {NumericValue{Int16{0}}, NumericError::Overflow};
+            }
+            return {NumericValue{Int16{static_cast<int16_t>(std::round(val))}}, NumericError::None};
+        } else if (hasSingleSuffix || (!hasDoubleSuffix && !forceDouble)) {
+            // Use single precision with MBF conversion
+            auto mbf32 = parseMBF32FromString(cleanStr);
+            float value = convertFromMBF32(mbf32);
+            return {NumericValue{Single{value}}, NumericError::None};
+        } else {
+            // Use double precision with MBF conversion
+            auto mbf64 = parseMBF64FromString(cleanStr);
+            double value = convertFromMBF64(mbf64);
+            return {NumericValue{Double{value}}, NumericError::None};
+        }
+    } catch (...) {
+        return {NumericValue{Int16{0}}, NumericError::TypeMismatch};
+    }
 }
 
 // PRINT USING helper functions

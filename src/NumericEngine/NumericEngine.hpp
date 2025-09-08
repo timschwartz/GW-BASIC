@@ -4,6 +4,7 @@
 #include <string>
 #include <variant>
 #include <optional>
+#include "MBFFormat.hpp"
 
 // Microsoft Binary Format (MBF) compatible numeric types
 struct Int16 { int16_t v{}; };
@@ -117,7 +118,7 @@ public:
     NumericValue promoteType(const NumericValue& a, const NumericValue& b);
 
     // String/numeric conversion (compatible with GW-BASIC VAL/STR$ behavior)
-    NumericResult<NumericValue> parseNumber(const std::string& str);
+    NumericResult<NumericValue> parseNumber(const std::string& str, bool forceDouble = false);
     std::string formatNumber(const NumericValue& value, const FormatOptions& options = {});
     
     // PRINT USING formatting
@@ -138,10 +139,17 @@ private:
     std::string formatExponential(double value, const FormatOptions& options);
     
     // Microsoft Binary Format (MBF) compatibility helpers
-    float convertToMBFSingle(float ieee754);
-    double convertToMBFDouble(double ieee754);
-    float convertFromMBFSingle(float mbf);
-    double convertFromMBFDouble(double mbf);
+    MBF::MBF32 convertToMBF32(float ieee754);
+    MBF::MBF64 convertToMBF64(double ieee754);
+    float convertFromMBF32(const MBF::MBF32& mbf);
+    double convertFromMBF64(const MBF::MBF64& mbf);
+    
+    // MBF-aware rounding and normalization
+    MBF::MBF32 roundToMBF32Precision(const MBF::MBF64& value);
+    std::string formatMBFValue(const MBF::MBF32& value);
+    std::string formatMBFValue(const MBF::MBF64& value);
+    MBF::MBF32 parseMBF32FromString(const std::string& str);
+    MBF::MBF64 parseMBF64FromString(const std::string& str);
     
     // PRINT USING helper functions
     std::optional<NumericPattern> parseNumericFormat(const std::string& format, size_t& pos);
