@@ -100,6 +100,7 @@ private:
     void advance();
     void skipWhitespace();
     void handleLineEnd();
+    std::string preprocessLineContinuation(const std::string& source);
     char peekChar(size_t offset = 1) const;
     bool isAtEnd() const;
     bool isAlpha(char c) const;

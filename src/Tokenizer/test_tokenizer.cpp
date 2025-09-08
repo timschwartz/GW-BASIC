@@ -416,3 +416,107 @@ TEST_CASE("Line ending handling") {
     }
     // Note: Depending on implementation, newlines might be handled differently
 }
+
+TEST_CASE("Line continuation with underscore") {
+    Tokenizer tokenizer;
+    
+    SECTION("Basic line continuation") {
+        // Test simple line continuation
+        std::string source = "PRINT \"Hello\" + _\n\"World\"";
+        auto tokens = tokenizer.tokenize(source);
+        
+        // Should be equivalent to: PRINT "Hello" + "World"
+        // Verify that we have PRINT, string, +, string, EOF
+        REQUIRE(tokens.size() >= 5);
+        
+        // Find the tokens
+        bool foundPrint = false, foundPlus = false, foundHello = false, foundWorld = false;
+        for (const auto& token : tokens) {
+            if (token.text == "PRINT") foundPrint = true;
+            if (token.text == "+") foundPlus = true;
+            if (token.text.find("Hello") != std::string::npos) foundHello = true;
+            if (token.text.find("World") != std::string::npos) foundWorld = true;
+        }
+        
+        REQUIRE(foundPrint);
+        REQUIRE(foundPlus);
+        REQUIRE(foundHello);
+        REQUIRE(foundWorld);
+    }
+    
+    SECTION("Line continuation with CRLF") {
+        // Test line continuation with Windows line endings
+        std::string source = "FOR I = 1 TO _\r\n10";
+        auto tokens = tokenizer.tokenize(source);
+        
+        // Should be equivalent to: FOR I = 1 TO 10
+        bool foundFor = false, foundTo = false, foundOne = false, foundTen = false;
+        for (const auto& token : tokens) {
+            if (token.text == "FOR") foundFor = true;
+            if (token.text == "TO") foundTo = true;
+            if (token.text == "1") foundOne = true;
+            if (token.text == "10") foundTen = true;
+        }
+        
+        REQUIRE(foundFor);
+        REQUIRE(foundTo);
+        REQUIRE(foundOne);
+        REQUIRE(foundTen);
+    }
+    
+    SECTION("Line continuation with whitespace") {
+        // Test line continuation with trailing whitespace after underscore
+        std::string source = "IF A > B _   \nTHEN PRINT A";
+        auto tokens = tokenizer.tokenize(source);
+        
+        // Should be equivalent to: IF A > B THEN PRINT A
+        bool foundIf = false, foundThen = false;
+        for (const auto& token : tokens) {
+            if (token.text == "IF") foundIf = true;
+            if (token.text == "THEN") foundThen = true;
+        }
+        
+        REQUIRE(foundIf);
+        REQUIRE(foundThen);
+    }
+    
+    SECTION("Multiple line continuations") {
+        // Test multiple line continuations in sequence
+        std::string source = "PRINT A + _\nB + _\nC";
+        auto tokens = tokenizer.tokenize(source);
+        
+        // Should be equivalent to: PRINT A + B + C
+        bool foundPrint = false, foundA = false, foundB = false, foundC = false;
+        int plusCount = 0;
+        for (const auto& token : tokens) {
+            if (token.text == "PRINT") foundPrint = true;
+            if (token.text == "A") foundA = true;
+            if (token.text == "B") foundB = true;
+            if (token.text == "C") foundC = true;
+            if (token.text == "+") plusCount++;
+        }
+        
+        REQUIRE(foundPrint);
+        REQUIRE(foundA);
+        REQUIRE(foundB);
+        REQUIRE(foundC);
+        REQUIRE(plusCount == 2);
+    }
+    
+    SECTION("Underscore not at line end") {
+        // Test that underscores not followed by line endings are preserved
+        std::string source = "MY_VARIABLE = 10";
+        auto tokens = tokenizer.tokenize(source);
+        
+        // Should find MY_VARIABLE as an identifier
+        bool foundVariable = false;
+        for (const auto& token : tokens) {
+            if (token.text == "MY_VARIABLE") {
+                foundVariable = true;
+                break;
+            }
+        }
+        
+        REQUIRE(foundVariable);
+    }
+}

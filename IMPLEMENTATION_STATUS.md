@@ -18,7 +18,7 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **Testing Framework**: Unit tests for all major components, integration tests for key features
 
 ### Tokenizer Component
-**Status: ✅ COMPLETE (95%)**
+**Status: ✅ COMPLETE (100%)**
 - ✅ Basic tokenization (keywords, operators, numbers, strings)
 - ✅ Reserved word recognition and statement/keyword mapping
 - ✅ Operator tokenization with proper precedence
@@ -29,11 +29,18 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ Octal number support (&377 format)
 - ✅ Number type suffixes (%, !, #)
 - ✅ Line ending handling (LF, CRLF, CR)
+- ✅ Line continuation with underscore (_ + line ending)
+- ✅ Underscore support in identifiers (MY_VARIABLE)
 - ✅ Comprehensive error handling
-- ✅ Full test coverage (68 assertions, 8 test cases)
-- ⚠️ Advanced: Line continuation with underscore (minor feature)
+- ✅ Full test coverage (85 assertions, 9 test cases)
 
 **Files**: `src/Tokenizer/` (Tokenizer.hpp, Tokenizer.cpp, test_tokenizer.cpp)
+
+**Recent Enhancements:**
+- Line continuation preprocessing with underscore (`_`) support
+- Enhanced identifier parsing to include underscores in variable names
+- Comprehensive test coverage for line continuation edge cases
+- Cross-platform line ending compatibility (LF, CRLF, CR)
 
 ### Program Store (95% Complete)
 - ✅ **Linked List Storage**: Compatible with original GW-BASIC format

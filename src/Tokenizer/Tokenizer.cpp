@@ -336,9 +336,12 @@ void Tokenizer::addExtendedFunction(const std::string& name, uint8_t index) {
 }
 
 std::vector<Tokenizer::Token> Tokenizer::tokenize(const std::string& source) {
-    currentSource = source;
+    // Preprocess line continuations first
+    std::string processedSource = preprocessLineContinuation(source);
+    
+    currentSource = processedSource;
     currentPosition = 0;
-    currentChar = source.empty() ? '\0' : source[0];
+    currentChar = processedSource.empty() ? '\0' : processedSource[0];
     
     std::vector<Token> tokens;
     
@@ -801,7 +804,7 @@ Tokenizer::Token Tokenizer::scanIdentifier() {
     std::string word;
     
     while (isAlphaNumeric(currentChar) || currentChar == '$' || currentChar == '%' || 
-           currentChar == '!' || currentChar == '#' || currentChar == '&') {
+           currentChar == '!' || currentChar == '#' || currentChar == '&' || currentChar == '_') {
         word += std::toupper(currentChar);
         advance();
     }
@@ -1040,6 +1043,60 @@ void Tokenizer::handleLineEnd() {
     } else if (currentChar == '\n') {
         advance(); // Handle LF
     }
+}
+
+std::string Tokenizer::preprocessLineContinuation(const std::string& source) {
+    std::string result;
+    result.reserve(source.length()); // Reserve space for efficiency
+    
+    for (size_t i = 0; i < source.length(); ++i) {
+        char ch = source[i];
+        
+        // Check for line continuation: underscore followed by line ending
+        if (ch == '_') {
+            // Look ahead to see if this is a line continuation
+            size_t j = i + 1;
+            
+            // Skip any trailing whitespace after underscore
+            while (j < source.length() && (source[j] == ' ' || source[j] == '\t')) {
+                j++;
+            }
+            
+            // Check if we found a line ending (or end of file)
+            bool isLineContinuation = false;
+            if (j < source.length()) {
+                if (source[j] == '\n') {
+                    isLineContinuation = true;
+                    i = j; // Skip to the newline, it will be consumed by outer loop
+                } else if (source[j] == '\r') {
+                    isLineContinuation = true;
+                    i = j; // Skip to the CR
+                    // Check for CRLF
+                    if (j + 1 < source.length() && source[j + 1] == '\n') {
+                        i = j + 1; // Skip both CR and LF
+                    }
+                }
+            } else if (j == source.length()) {
+                // Underscore followed by whitespace at end of file is continuation
+                isLineContinuation = true;
+                i = j - 1; // Will be incremented by loop
+            }
+            
+            if (isLineContinuation) {
+                // Replace line continuation with a single space to maintain token separation
+                result += ' ';
+                continue;
+            } else {
+                // Not a line continuation - just a regular underscore
+                result += ch;
+            }
+        } else {
+            // Regular character - just copy it
+            result += ch;
+        }
+    }
+    
+    return result;
 }
 
 char Tokenizer::peekChar(size_t offset) const {
