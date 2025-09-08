@@ -4,6 +4,7 @@
 #include <string>
 #include <variant>
 #include <optional>
+#include <random>
 #include "MBFFormat.hpp"
 
 // Microsoft Binary Format (MBF) compatible numeric types
@@ -131,6 +132,10 @@ public:
 
 private:
     uint32_t randomSeed_;
+    
+    // Random number generation state
+    mutable std::mt19937 randomGenerator_;
+    mutable std::uniform_real_distribution<float> randomDistribution_;
     
     // Internal helper functions
     NumericError checkOverflow(double value, bool isSingle = false);

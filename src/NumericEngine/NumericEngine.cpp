@@ -10,11 +10,12 @@
 #include <chrono>
 #include <optional>
 
-NumericEngine::NumericEngine() {
+NumericEngine::NumericEngine() : randomDistribution_(0.0f, 1.0f) {
     // Initialize random seed with current time
     auto now = std::chrono::high_resolution_clock::now();
     auto duration = now.time_since_epoch();
     randomSeed_ = static_cast<uint32_t>(duration.count() & 0xFFFFFFFF);
+    randomGenerator_.seed(randomSeed_);
 }
 
 // Basic arithmetic operations
@@ -272,6 +273,148 @@ NumericResult<Int16> NumericEngine::equals(const NumericValue& a, const NumericV
     return {Int16{result}, NumericError::None};  // GW-BASIC true = -1
 }
 
+NumericResult<Int16> NumericEngine::notEquals(const NumericValue& a, const NumericValue& b) {
+    auto cmp = compare(a, b);
+    if (!cmp) return cmp;
+    int16_t result = (cmp.value.v != 0) ? static_cast<int16_t>(-1) : static_cast<int16_t>(0);
+    return {Int16{result}, NumericError::None};
+}
+
+NumericResult<Int16> NumericEngine::lessThan(const NumericValue& a, const NumericValue& b) {
+    auto cmp = compare(a, b);
+    if (!cmp) return cmp;
+    int16_t result = (cmp.value.v < 0) ? static_cast<int16_t>(-1) : static_cast<int16_t>(0);
+    return {Int16{result}, NumericError::None};
+}
+
+NumericResult<Int16> NumericEngine::lessEqual(const NumericValue& a, const NumericValue& b) {
+    auto cmp = compare(a, b);
+    if (!cmp) return cmp;
+    int16_t result = (cmp.value.v <= 0) ? static_cast<int16_t>(-1) : static_cast<int16_t>(0);
+    return {Int16{result}, NumericError::None};
+}
+
+NumericResult<Int16> NumericEngine::greaterThan(const NumericValue& a, const NumericValue& b) {
+    auto cmp = compare(a, b);
+    if (!cmp) return cmp;
+    int16_t result = (cmp.value.v > 0) ? static_cast<int16_t>(-1) : static_cast<int16_t>(0);
+    return {Int16{result}, NumericError::None};
+}
+
+NumericResult<Int16> NumericEngine::greaterEqual(const NumericValue& a, const NumericValue& b) {
+    auto cmp = compare(a, b);
+    if (!cmp) return cmp;
+    int16_t result = (cmp.value.v >= 0) ? static_cast<int16_t>(-1) : static_cast<int16_t>(0);
+    return {Int16{result}, NumericError::None};
+}
+
+// Type conversion functions
+NumericResult<Int16> NumericEngine::toInt16(const NumericValue& a) {
+    return std::visit([](auto&& x) -> NumericResult<Int16> {
+        using T = std::decay_t<decltype(x)>;
+        if constexpr (std::is_same_v<T, Int16>) {
+            return {x, NumericError::None};
+        } else if constexpr (std::is_same_v<T, Single>) {
+            // Round to nearest integer, then check range
+            double rounded = std::round(x.v);
+            if (rounded < -32768.0 || rounded > 32767.0) {
+                return {Int16{0}, NumericError::Overflow};
+            }
+            return {Int16{static_cast<int16_t>(rounded)}, NumericError::None};
+        } else {
+            // Double case
+            double rounded = std::round(x.v);
+            if (rounded < -32768.0 || rounded > 32767.0) {
+                return {Int16{0}, NumericError::Overflow};
+            }
+            return {Int16{static_cast<int16_t>(rounded)}, NumericError::None};
+        }
+    }, a);
+}
+
+NumericResult<Single> NumericEngine::toSingle(const NumericValue& a) {
+    return std::visit([](auto&& x) -> NumericResult<Single> {
+        using T = std::decay_t<decltype(x)>;
+        if constexpr (std::is_same_v<T, Int16>) {
+            return {Single{static_cast<float>(x.v)}, NumericError::None};
+        } else if constexpr (std::is_same_v<T, Single>) {
+            return {x, NumericError::None};
+        } else {
+            // Double to Single conversion - check for overflow
+            if (std::abs(x.v) > 3.4e38) {
+                return {Single{0.0f}, NumericError::Overflow};
+            }
+            return {Single{static_cast<float>(x.v)}, NumericError::None};
+        }
+    }, a);
+}
+
+NumericResult<Double> NumericEngine::toDouble(const NumericValue& a) {
+    return std::visit([](auto&& x) -> NumericResult<Double> {
+        using T = std::decay_t<decltype(x)>;
+        if constexpr (std::is_same_v<T, Int16>) {
+            return {Double{static_cast<double>(x.v)}, NumericError::None};
+        } else if constexpr (std::is_same_v<T, Single>) {
+            return {Double{static_cast<double>(x.v)}, NumericError::None};
+        } else {
+            return {x, NumericError::None};
+        }
+    }, a);
+}
+
+NumericValue NumericEngine::promoteType(const NumericValue& a, const NumericValue& b) {
+    // GW-BASIC type promotion rules:
+    // Int16 + Int16 -> Int16 (until overflow)
+    // Int16 + Single -> Single
+    // Int16 + Double -> Double
+    // Single + Single -> Single
+    // Single + Double -> Double
+    // Double + Double -> Double
+    
+    if (std::holds_alternative<Double>(a) || std::holds_alternative<Double>(b)) {
+        return Double{0.0}; // Template for Double type
+    } else if (std::holds_alternative<Single>(a) || std::holds_alternative<Single>(b)) {
+        return Single{0.0f}; // Template for Single type
+    } else {
+        return Int16{0}; // Template for Int16 type
+    }
+}
+
+void NumericEngine::randomize(std::optional<NumericValue> seed) {
+    if (seed.has_value()) {
+        double seedVal = std::visit([](auto&& x) -> double {
+            using T = std::decay_t<decltype(x)>;
+            if constexpr (std::is_same_v<T, Int16>) return x.v;
+            if constexpr (std::is_same_v<T, Single>) return x.v;
+            if constexpr (std::is_same_v<T, Double>) return x.v;
+            return 0.0;
+        }, seed.value());
+        
+        randomSeed_ = static_cast<uint32_t>(std::abs(seedVal));
+    } else {
+        // Use current time as seed
+        auto now = std::chrono::high_resolution_clock::now();
+        auto duration = now.time_since_epoch();
+        randomSeed_ = static_cast<uint32_t>(duration.count() & 0xFFFFFFFF);
+    }
+    
+    // Re-seed the generator with the new seed
+    randomGenerator_.seed(randomSeed_);
+}
+
+bool NumericEngine::isInteger(const NumericValue& a) {
+    return std::visit([](auto&& x) -> bool {
+        using T = std::decay_t<decltype(x)>;
+        if constexpr (std::is_same_v<T, Int16>) {
+            return true; // Integers are always integers
+        } else if constexpr (std::is_same_v<T, Single>) {
+            return std::floor(x.v) == x.v;
+        } else {
+            return std::floor(x.v) == x.v;
+        }
+    }, a);
+}
+
 // Math functions
 NumericResult<NumericValue> NumericEngine::sqrt(const NumericValue& a) {
     double val = std::visit([](auto&& x) -> double {
@@ -295,10 +438,264 @@ NumericResult<NumericValue> NumericEngine::sqrt(const NumericValue& a) {
     }
 }
 
-NumericResult<Single> NumericEngine::rnd(std::optional<NumericValue> seed) {
-    static std::mt19937 generator(randomSeed_);
-    static std::uniform_real_distribution<float> distribution(0.0f, 1.0f);
+NumericResult<NumericValue> NumericEngine::sin(const NumericValue& a) {
+    double val = std::visit([](auto&& x) -> double {
+        using T = std::decay_t<decltype(x)>;
+        if constexpr (std::is_same_v<T, Int16>) return x.v;
+        if constexpr (std::is_same_v<T, Single>) return x.v;
+        if constexpr (std::is_same_v<T, Double>) return x.v;
+        return 0.0;
+    }, a);
     
+    double result = std::sin(val);
+    
+    if (std::holds_alternative<Double>(a)) {
+        return {NumericValue{Double{result}}, NumericError::None};
+    } else {
+        return {NumericValue{Single{static_cast<float>(result)}}, NumericError::None};
+    }
+}
+
+NumericResult<NumericValue> NumericEngine::cos(const NumericValue& a) {
+    double val = std::visit([](auto&& x) -> double {
+        using T = std::decay_t<decltype(x)>;
+        if constexpr (std::is_same_v<T, Int16>) return x.v;
+        if constexpr (std::is_same_v<T, Single>) return x.v;
+        if constexpr (std::is_same_v<T, Double>) return x.v;
+        return 0.0;
+    }, a);
+    
+    double result = std::cos(val);
+    
+    if (std::holds_alternative<Double>(a)) {
+        return {NumericValue{Double{result}}, NumericError::None};
+    } else {
+        return {NumericValue{Single{static_cast<float>(result)}}, NumericError::None};
+    }
+}
+
+NumericResult<NumericValue> NumericEngine::tan(const NumericValue& a) {
+    double val = std::visit([](auto&& x) -> double {
+        using T = std::decay_t<decltype(x)>;
+        if constexpr (std::is_same_v<T, Int16>) return x.v;
+        if constexpr (std::is_same_v<T, Single>) return x.v;
+        if constexpr (std::is_same_v<T, Double>) return x.v;
+        return 0.0;
+    }, a);
+    
+    double result = std::tan(val);
+    
+    // Check for overflow (tan can produce very large values near π/2 + nπ)
+    if (!std::isfinite(result)) {
+        return {NumericValue{Double{0.0}}, NumericError::Overflow};
+    }
+    
+    if (std::holds_alternative<Double>(a)) {
+        return {NumericValue{Double{result}}, NumericError::None};
+    } else {
+        return {NumericValue{Single{static_cast<float>(result)}}, NumericError::None};
+    }
+}
+
+NumericResult<NumericValue> NumericEngine::atn(const NumericValue& a) {
+    double val = std::visit([](auto&& x) -> double {
+        using T = std::decay_t<decltype(x)>;
+        if constexpr (std::is_same_v<T, Int16>) return x.v;
+        if constexpr (std::is_same_v<T, Single>) return x.v;
+        if constexpr (std::is_same_v<T, Double>) return x.v;
+        return 0.0;
+    }, a);
+    
+    double result = std::atan(val);
+    
+    if (std::holds_alternative<Double>(a)) {
+        return {NumericValue{Double{result}}, NumericError::None};
+    } else {
+        return {NumericValue{Single{static_cast<float>(result)}}, NumericError::None};
+    }
+}
+
+NumericResult<NumericValue> NumericEngine::log(const NumericValue& a) {
+    double val = std::visit([](auto&& x) -> double {
+        using T = std::decay_t<decltype(x)>;
+        if constexpr (std::is_same_v<T, Int16>) return x.v;
+        if constexpr (std::is_same_v<T, Single>) return x.v;
+        if constexpr (std::is_same_v<T, Double>) return x.v;
+        return 0.0;
+    }, a);
+    
+    if (val <= 0.0) {
+        return {NumericValue{Double{0.0}}, NumericError::IllegalFunctionCall};
+    }
+    
+    double result = std::log(val);
+    
+    if (std::holds_alternative<Double>(a)) {
+        return {NumericValue{Double{result}}, NumericError::None};
+    } else {
+        return {NumericValue{Single{static_cast<float>(result)}}, NumericError::None};
+    }
+}
+
+NumericResult<NumericValue> NumericEngine::exp(const NumericValue& a) {
+    double val = std::visit([](auto&& x) -> double {
+        using T = std::decay_t<decltype(x)>;
+        if constexpr (std::is_same_v<T, Int16>) return x.v;
+        if constexpr (std::is_same_v<T, Single>) return x.v;
+        if constexpr (std::is_same_v<T, Double>) return x.v;
+        return 0.0;
+    }, a);
+    
+    double result = std::exp(val);
+    
+    // Check for overflow
+    if (!std::isfinite(result)) {
+        return {NumericValue{Double{0.0}}, NumericError::Overflow};
+    }
+    
+    auto error = checkOverflow(result, std::holds_alternative<Single>(a));
+    if (error != NumericError::None) {
+        return {NumericValue{Double{0.0}}, error};
+    }
+    
+    if (std::holds_alternative<Double>(a)) {
+        return {NumericValue{Double{result}}, NumericError::None};
+    } else {
+        return {NumericValue{Single{static_cast<float>(result)}}, NumericError::None};
+    }
+}
+
+NumericResult<NumericValue> NumericEngine::abs(const NumericValue& a) {
+    return std::visit([](auto&& x) -> NumericResult<NumericValue> {
+        using T = std::decay_t<decltype(x)>;
+        if constexpr (std::is_same_v<T, Int16>) {
+            // Special case: abs of minimum int16 would overflow
+            if (x.v == std::numeric_limits<int16_t>::min()) {
+                return {NumericValue{Single{32768.0f}}, NumericError::None};
+            }
+            return {NumericValue{Int16{static_cast<int16_t>(std::abs(x.v))}}, NumericError::None};
+        } else if constexpr (std::is_same_v<T, Single>) {
+            return {NumericValue{Single{std::abs(x.v)}}, NumericError::None};
+        } else {
+            return {NumericValue{Double{std::abs(x.v)}}, NumericError::None};
+        }
+    }, a);
+}
+
+NumericResult<Int16> NumericEngine::sgn(const NumericValue& a) {
+    double val = std::visit([](auto&& x) -> double {
+        using T = std::decay_t<decltype(x)>;
+        if constexpr (std::is_same_v<T, Int16>) return x.v;
+        if constexpr (std::is_same_v<T, Single>) return x.v;
+        if constexpr (std::is_same_v<T, Double>) return x.v;
+        return 0.0;
+    }, a);
+    
+    int16_t result = (val > 0.0) ? 1 : (val < 0.0) ? -1 : 0;
+    return {Int16{result}, NumericError::None};
+}
+
+NumericResult<Int16> NumericEngine::intFunc(const NumericValue& a) {
+    double val = std::visit([](auto&& x) -> double {
+        using T = std::decay_t<decltype(x)>;
+        if constexpr (std::is_same_v<T, Int16>) return x.v;
+        if constexpr (std::is_same_v<T, Single>) return x.v;
+        if constexpr (std::is_same_v<T, Double>) return x.v;
+        return 0.0;
+    }, a);
+    
+    // INT function: largest integer <= value (floor function)
+    double result = std::floor(val);
+    
+    // Check if result fits in Int16 range
+    if (result < -32768.0 || result > 32767.0) {
+        return {Int16{0}, NumericError::Overflow};
+    }
+    
+    return {Int16{static_cast<int16_t>(result)}, NumericError::None};
+}
+
+NumericResult<Int16> NumericEngine::fix(const NumericValue& a) {
+    double val = std::visit([](auto&& x) -> double {
+        using T = std::decay_t<decltype(x)>;
+        if constexpr (std::is_same_v<T, Int16>) return x.v;
+        if constexpr (std::is_same_v<T, Single>) return x.v;
+        if constexpr (std::is_same_v<T, Double>) return x.v;
+        return 0.0;
+    }, a);
+    
+    // FIX function: truncate toward zero (remove fractional part)
+    double result = std::trunc(val);
+    
+    // Check if result fits in Int16 range
+    if (result < -32768.0 || result > 32767.0) {
+        return {Int16{0}, NumericError::Overflow};
+    }
+    
+    return {Int16{static_cast<int16_t>(result)}, NumericError::None};
+}
+
+NumericResult<NumericValue> NumericEngine::modulo(const NumericValue& a, const NumericValue& b) {
+    // Check for division by zero first
+    if (isZero(b)) {
+        return {NumericValue{Double{0.0}}, NumericError::DivisionByZero};
+    }
+    
+    return std::visit([this, &a, &b](auto&& x, auto&& y) -> NumericResult<NumericValue> {
+        using T1 = std::decay_t<decltype(x)>;
+        using T2 = std::decay_t<decltype(y)>;
+        
+        if constexpr (std::is_same_v<T1, Int16> && std::is_same_v<T2, Int16>) {
+            int16_t result = x.v % y.v;
+            return {NumericValue{Int16{result}}, NumericError::None};
+        } else {
+            // For floating point, use fmod
+            double dx = std::visit([](auto&& val) -> double {
+                using T = std::decay_t<decltype(val)>;
+                if constexpr (std::is_same_v<T, Int16>) return val.v;
+                if constexpr (std::is_same_v<T, Single>) return val.v;
+                if constexpr (std::is_same_v<T, Double>) return val.v;
+                return 0.0;
+            }, a);
+            
+            double dy = std::visit([](auto&& val) -> double {
+                using T = std::decay_t<decltype(val)>;
+                if constexpr (std::is_same_v<T, Int16>) return val.v;
+                if constexpr (std::is_same_v<T, Single>) return val.v;
+                if constexpr (std::is_same_v<T, Double>) return val.v;
+                return 0.0;
+            }, b);
+            
+            double result = std::fmod(dx, dy);
+            
+            // Return in highest precision type of the operands
+            if (std::holds_alternative<Double>(a) || std::holds_alternative<Double>(b)) {
+                return {NumericValue{Double{result}}, NumericError::None};
+            } else {
+                return {NumericValue{Single{static_cast<float>(result)}}, NumericError::None};
+            }
+        }
+    }, a, b);
+}
+
+NumericResult<NumericValue> NumericEngine::negate(const NumericValue& a) {
+    return std::visit([](auto&& x) -> NumericResult<NumericValue> {
+        using T = std::decay_t<decltype(x)>;
+        if constexpr (std::is_same_v<T, Int16>) {
+            // Special case: negating minimum int16 would overflow
+            if (x.v == std::numeric_limits<int16_t>::min()) {
+                return {NumericValue{Single{32768.0f}}, NumericError::None};
+            }
+            return {NumericValue{Int16{static_cast<int16_t>(-x.v)}}, NumericError::None};
+        } else if constexpr (std::is_same_v<T, Single>) {
+            return {NumericValue{Single{-x.v}}, NumericError::None};
+        } else {
+            return {NumericValue{Double{-x.v}}, NumericError::None};
+        }
+    }, a);
+}
+
+NumericResult<Single> NumericEngine::rnd(std::optional<NumericValue> seed) {
     if (seed.has_value()) {
         double seedVal = std::visit([](auto&& x) -> double {
             using T = std::decay_t<decltype(x)>;
@@ -312,15 +709,19 @@ NumericResult<Single> NumericEngine::rnd(std::optional<NumericValue> seed) {
             // Negative seed: reseed with system time
             auto now = std::chrono::high_resolution_clock::now();
             auto duration = now.time_since_epoch();
-            generator.seed(static_cast<uint32_t>(duration.count() & 0xFFFFFFFF));
+            uint32_t newSeed = static_cast<uint32_t>(duration.count() & 0xFFFFFFFF);
+            randomGenerator_.seed(newSeed);
+            randomSeed_ = newSeed;
         } else if (seedVal > 0) {
             // Positive seed: reseed with provided value
-            generator.seed(static_cast<uint32_t>(seedVal));
+            uint32_t newSeed = static_cast<uint32_t>(seedVal);
+            randomGenerator_.seed(newSeed);
+            randomSeed_ = newSeed;
         }
         // Zero seed: use current sequence
     }
     
-    return {Single{distribution(generator)}, NumericError::None};
+    return {Single{randomDistribution_(randomGenerator_)}, NumericError::None};
 }
 
 // String/numeric conversion

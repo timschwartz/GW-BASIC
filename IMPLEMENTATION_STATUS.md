@@ -104,16 +104,17 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - Edge case handling for zero, infinity, and subnormal numbers
 - Integration with NumericEngine for transparent MBF-aware operations
 
-### Numeric Engine (95% Complete)
-- ✅ **Basic Arithmetic**: Add, subtract, multiply, divide with proper overflow handling
+### Numeric Engine (100% Complete)
+- ✅ **Basic Arithmetic**: Add, subtract, multiply, divide, modulo with proper overflow handling
 - ✅ **Comparison Operations**: All comparison operators with GW-BASIC semantics
-- ✅ **Math Functions**: ABS, SGN, INT, FIX, SQR, LOG, EXP, SIN, COS, TAN, ATN
-- ✅ **Random Numbers**: RND function with seed support
+- ✅ **Math Functions**: Complete implementation - ABS, SGN, INT, FIX, SQR, LOG, EXP, SIN, COS, TAN, ATN
+- ✅ **Random Numbers**: RND function with seed support and RANDOMIZE
 - ✅ **Type Conversions**: Between Int16, Single, Double with GW-BASIC rules
+- ✅ **Unary Operations**: Negate, absolute value, sign with proper overflow handling
 - ✅ **Error Handling**: Proper GW-BASIC error codes (6, 11, 5, 13)
 - ✅ **PRINT USING Formatting**: Complete implementation with numeric patterns (#, ., ,), currency ($), sign (+/-), and asterisk fill (*)
 - ✅ **MBF Compatibility Layer**: Complete Microsoft Binary Format support for bit-for-bit compatibility with original GW-BASIC numeric operations
-- ⚠️ **Missing**: Some advanced math functions
+- ✅ **Utility Functions**: isZero, isNegative, isInteger for type checking and validation
 
 **Files**: `src/NumericEngine/` (NumericEngine.hpp, NumericEngine.cpp, test_numeric.cpp, MBFFormat.hpp, MBFFormat.cpp, test_mbf.cpp)
 
