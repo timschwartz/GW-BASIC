@@ -70,7 +70,7 @@ InterpreterLoop::StepResult InterpreterLoop::step() {
     uint16_t nextOverride = 0;
     if (handler) {
         // Handler can throw to signal runtime error
-        nextOverride = handler(tokens);
+        nextOverride = handler(tokens, currentLine);
     }
 
     if (halted) return StepResult::Halted;
@@ -103,7 +103,7 @@ bool InterpreterLoop::executeImmediate(const std::string& source) {
     auto bytes = tok->crunch(source);
     if (bytes.empty()) return false;
     if (traceEnabled) traceLine(0, bytes); // line 0 indicates immediate
-    handler(bytes);
+    handler(bytes, 0); // immediate mode uses line 0
     return true;
 }
 

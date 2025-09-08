@@ -30,9 +30,9 @@ public:
     // Diagnostic / trace callback: (lineNumber, rawTokens)
     using TraceCallback = std::function<void(uint16_t, const std::vector<uint8_t>&)>;
 
-    // Statement handler callback: given a tokenized line body, execute one statement and
+    // Statement handler callback: given a tokenized line body and current line number, execute one statement and
     // return optional next line override (0 = fall-through). Can throw to signal error.
-    using StatementHandler = std::function<uint16_t(const std::vector<uint8_t>& tokens)>;
+    using StatementHandler = std::function<uint16_t(const std::vector<uint8_t>& tokens, uint16_t currentLine)>;
 
     // Constructors
     InterpreterLoop(std::shared_ptr<ProgramStore> program,

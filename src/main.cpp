@@ -87,9 +87,9 @@ public:
             [this](const std::string& text) { print(text); });
         
         // Set up interpreter with our dispatcher
-        interpreter->setStatementHandler([this](const std::vector<uint8_t>& tokens) -> uint16_t {
+        interpreter->setStatementHandler([this](const std::vector<uint8_t>& tokens, uint16_t currentLine) -> uint16_t {
             try {
-                auto result = (*dispatcher)(tokens);
+                auto result = (*dispatcher)(tokens, currentLine);
                 if (result == 0xFFFF) {
                     // END/STOP encountered
                     print("Break\n");

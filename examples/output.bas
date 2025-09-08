@@ -1,0 +1,5 @@
+10 PRINT "Hello from SAVE test!"
+20 FOR X = 1 TO 3
+30 PRINT "X ="X
+40 NEXT X
+50 END 

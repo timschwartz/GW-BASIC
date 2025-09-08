@@ -34,5 +34,6 @@ AC_CONFIG_FILES([Makefile
                  src/InterpreterLoop/Makefile
                  src/ExpressionEvaluator/Makefile
                  src/NumericEngine/Makefile
-                 tests/Makefile])
+                 tests/Makefile
+                 tests/integration/Makefile])
 AC_OUTPUT

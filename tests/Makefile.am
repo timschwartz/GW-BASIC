@@ -1,5 +1,7 @@
 # Automake file for tests
 
+SUBDIRS = integration
+
 AM_CPPFLAGS = -I$(top_srcdir)/src
 
 if HAVE_CATCH2

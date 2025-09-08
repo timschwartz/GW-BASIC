@@ -47,9 +47,9 @@ int main() {
             std::cout << "[TRACE] Executing line " << line << std::endl;
         });
         BasicDispatcher disp(tokenizer);
-        loop.setStatementHandler([&](const std::vector<uint8_t>& bytes){
+        loop.setStatementHandler([&](const std::vector<uint8_t>& bytes, uint16_t currentLine){
             try {
-                auto j = disp(bytes);
+                auto j = disp(bytes, currentLine);
                 if (j == 0xFFFF) { loop.stop(); return uint16_t{0}; }
                 return j;
             } catch (const expr::BasicError& e) {

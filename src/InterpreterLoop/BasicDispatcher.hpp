@@ -47,7 +47,12 @@ public:
     }
 
     uint16_t operator()(const std::vector<uint8_t>& tokens) {
+        return operator()(tokens, 0); // default to line 0 if not specified
+    }
+    
+    uint16_t operator()(const std::vector<uint8_t>& tokens, uint16_t currentLineNumber) {
         size_t pos = 0;
+        currentLine = currentLineNumber; // store for use by statement handlers
         expr::Env envRef = env; // local view for eval; share vars by reference via pointer below if needed
         // peek first significant byte
         skipSpaces(tokens, pos);
@@ -93,6 +98,7 @@ private:
     gwbasic::RuntimeStack runtimeStack;
     expr::Env env;
     PrintCallback printCallback;
+    uint16_t currentLine = 0; // Current line number being executed
 
     // Helpers to convert between runtime Value and evaluator Value
     static expr::Value toExprValue(const gwbasic::Value& v) {
@@ -589,7 +595,16 @@ private:
         frame.control = toRuntimeValue(varName, startRes.value); // store current value
         frame.limit = toRuntimeValue("", endRes.value); // temporary storage for limit
         frame.step = toRuntimeValue("", stepVal); // temporary storage for step
-        frame.textPtr = static_cast<uint32_t>(pos); // where to continue after FOR
+        
+        // Find the next line after the current FOR line - this is where the loop body starts
+        uint16_t nextLine = 0;
+        if (prog) {
+            auto nextIt = prog->getNextLine(currentLine);
+            if (nextIt.isValid()) {
+                nextLine = nextIt->lineNumber;
+            }
+        }
+        frame.textPtr = static_cast<uint32_t>(nextLine); // line number to jump back to (start of loop body)
         
         runtimeStack.pushFor(frame);
         
@@ -692,8 +707,8 @@ private:
         
         if (shouldContinue) {
             // Continue loop - jump back to start of FOR body
-            // The textPtr in the frame should point to where execution continues after the FOR statement
-            return 0; // For now, just continue to next statement - real implementation would jump back
+            uint16_t jumpTarget = static_cast<uint16_t>(forFrame->textPtr);
+            return jumpTarget; // Jump back to the first line of the loop body
         } else {
             // Loop finished - pop FOR frame and continue
             gwbasic::ForFrame dummy;
