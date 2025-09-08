@@ -56,12 +56,6 @@ public:
         currentLine = currentLineNumber; // store for use by statement handlers
         expr::Env envRef = env; // local view for eval; share vars by reference via pointer below if needed
         
-        std::cerr << "BasicDispatcher: Processing " << tokens.size() << " tokens: ";
-        for (size_t i = 0; i < std::min(tokens.size(), size_t(20)); i++) {
-            std::cerr << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(tokens[i]) << " ";
-        }
-        std::cerr << std::dec << std::endl;
-        
         // peek first significant byte
         skipSpaces(tokens, pos);
         // Some sources may include a leading tokenized line-number (0x0D LL HH); skip it defensively
@@ -77,12 +71,10 @@ public:
             if (atEnd(tokens, pos)) break;
             if (tokens[pos] == ':') { ++pos; continue; }
             uint8_t b = tokens[pos];
-            std::cerr << "About to dispatch token 0x" << std::hex << static_cast<int>(b) << std::dec << " at pos " << pos << std::endl;
             uint16_t r = 0;
             if (b >= 0x80) {
                 r = handleStatement(tokens, pos);
             } else {
-                std::cerr << "Trying handleLet (implied assignment)" << std::endl;
                 r = handleLet(tokens, pos, /*implied*/true);
             }
             if (r != 0) return r; // jump or termination sentinel
@@ -166,8 +158,6 @@ private:
     uint8_t t = b[pos++]; // consume token
     // Map through Tokenizer public name lookup
     std::string name = tok ? tok->getTokenName(t) : std::string{};
-    
-    std::cerr << "handleStatement: token 0x" << std::hex << static_cast<int>(t) << std::dec << " -> '" << name << "'" << std::endl;
     
     if (name == "PRINT") return doPRINT(b, pos);
     if (name == "LET") return handleLet(b, pos, /*implied*/false);
@@ -773,13 +763,6 @@ private:
     uint16_t doON(const std::vector<uint8_t>& b, size_t& pos) {
         skipSpaces(b, pos);
         
-        // Debug: print the bytes we're about to process
-        std::cerr << "doON: Processing bytes from pos " << pos << ": ";
-        for (size_t i = pos; i < std::min(pos + 20, b.size()); i++) {
-            std::cerr << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b[i]) << " ";
-        }
-        std::cerr << std::dec << std::endl;
-        
         // Evaluate the expression to get the index
         auto res = ev.evaluate(b, pos, env);
         pos = res.nextPos;
@@ -787,24 +770,12 @@ private:
         // Convert to integer index (1-based)
         int16_t index = expr::ExpressionEvaluator::toInt16(res.value);
         
-        std::cerr << "doON: Evaluated index = " << index << ", new pos = " << pos << std::endl;
-        std::cerr << "doON: Next bytes: ";
-        for (size_t i = pos; i < std::min(pos + 10, b.size()); i++) {
-            std::cerr << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b[i]) << " ";
-        }
-        std::cerr << std::dec << std::endl;
-        
         skipSpaces(b, pos);
         
         // Check for GOTO or GOSUB keyword
         bool isGosub = false;
         if (!atEnd(b, pos)) {
             uint8_t t = b[pos];
-            std::cerr << "doON: Checking token at pos " << pos << ": 0x" << std::hex << static_cast<int>(t) << std::dec;
-            if (t >= 0x80 && tok) {
-                std::cerr << " (" << tok->getTokenName(t) << ")";
-            }
-            std::cerr << std::endl;
             
             if (t >= 0x80) {
                 std::string name = tok ? tok->getTokenName(t) : std::string{};
@@ -843,7 +814,7 @@ private:
         
         while (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
             skipSpaces(b, pos);
-            if (atEnd(b, pos) || b[pos] == ':') break;
+            if (atEnd(b, pos) || b[pos] == ':' || b[pos] == 0x00) break;
             
             // Check if we have an integer token (0x11) or ASCII digits
             if (pos + 2 < b.size() && b[pos] == 0x11) {
@@ -860,8 +831,8 @@ private:
                 }
                 lineNumbers.push_back(static_cast<uint16_t>(v));
             } else {
-                // Neither integer token nor ASCII digits - might be comma or end
-                if (b[pos] == ',') {
+                // Check for comma separator
+                if (b[pos] == ',' || b[pos] == 0xF5) { // 0xF5 is tokenized comma
                     ++pos; // consume comma and continue
                     continue;
                 } else {
@@ -873,7 +844,7 @@ private:
             skipSpaces(b, pos);
             
             // Optional comma - if present, consume it
-            if (!atEnd(b, pos) && b[pos] == ',') {
+            if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) {
                 ++pos; // consume comma
                 continue;
             }
