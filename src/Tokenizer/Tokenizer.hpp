@@ -99,6 +99,7 @@ private:
     // Lexical analysis
     void advance();
     void skipWhitespace();
+    void handleLineEnd();
     char peekChar(size_t offset = 1) const;
     bool isAtEnd() const;
     bool isAlpha(char c) const;
@@ -108,6 +109,8 @@ private:
     // Token recognition
     Token scanToken();
     Token scanNumber();
+    Token scanHexNumber();
+    Token scanOctalNumber();
     Token scanString();
     Token scanIdentifier();
     Token scanLineNumber();

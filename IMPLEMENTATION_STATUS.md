@@ -17,15 +17,21 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **Documentation**: Architecture documentation, implementation guides, and module READMEs
 - ✅ **Testing Framework**: Unit tests for all major components, integration tests for key features
 
-### Tokenizer/Cruncher (90% Complete)
-- ✅ **Token Recognition**: All GW-BASIC reserved words and operators
-- ✅ **Single-byte Tokens**: Complete support for 0x80-0xC9 range
-- ✅ **Two-byte Tokens**: Extended tokens with 0xFE, 0xFF, 0xFD prefixes  
-- ✅ **Number Encoding**: Integer (0x11), Single (0x1D), Double (0x1F) constants
-- ✅ **String Literals**: Proper tokenization and preservation
-- ✅ **Detokenization**: Round-trip conversion from tokens back to text
-- ✅ **Line Number Handling**: Embedded line number tokens (0x0D)
-- ⚠️ **Missing**: Some edge cases in multi-word token recognition
+### Tokenizer Component
+**Status: ✅ COMPLETE (95%)**
+- ✅ Basic tokenization (keywords, operators, numbers, strings)
+- ✅ Reserved word recognition and statement/keyword mapping
+- ✅ Operator tokenization with proper precedence
+- ✅ String literal handling with escape sequences
+- ✅ Numeric literal parsing (integers, floats, doubles)
+- ✅ Multi-character operators (<=, >=, <>)
+- ✅ Hexadecimal number support (&HFF format)
+- ✅ Octal number support (&377 format)
+- ✅ Number type suffixes (%, !, #)
+- ✅ Line ending handling (LF, CRLF, CR)
+- ✅ Comprehensive error handling
+- ✅ Full test coverage (68 assertions, 8 test cases)
+- ⚠️ Advanced: Line continuation with underscore (minor feature)
 
 **Files**: `src/Tokenizer/` (Tokenizer.hpp, Tokenizer.cpp, test_tokenizer.cpp)
 

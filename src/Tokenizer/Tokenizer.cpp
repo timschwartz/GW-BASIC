@@ -127,6 +127,18 @@ void Tokenizer::initializeTables() {
     addOperator('\\', operatorStart++); // IDIVTK (integer division)
     addOperator('\'', operatorStart++); // SNGQTK (single quote -> REM)
     
+    // Add punctuation tokens
+    addOperator('(', operatorStart++);  // Left parenthesis
+    addOperator(')', operatorStart++);  // Right parenthesis  
+    addOperator(',', operatorStart++);  // Comma
+    addOperator(';', operatorStart++);  // Semicolon
+    addOperator(':', operatorStart++);  // Colon (statement separator)
+    
+    // Add special multi-character operators to token names for detokenization
+    tokenNames[0xF1] = ">=";  // GEQUTK
+    tokenNames[0xF2] = "<=";  // LEQUTK  
+    tokenNames[0xF3] = "<>";  // NETK
+    
     // Add standard functions (two-byte tokens with 0xFF prefix)
     addStandardFunction("LEFT$", 0x00);
     addStandardFunction("RIGHT$", 0x01);
@@ -476,18 +488,23 @@ std::string Tokenizer::detokenize(const std::vector<uint8_t>& tokens) {
                 // This is an operator or other named token
                 // Add space before operator if needed
                 if (!result.str().empty() && result.str().back() != ' ' && 
-                    result.str().back() != '\n') {
+                    result.str().back() != '\n' && result.str().back() != '(') {
                     result << " ";
                 }
                 result << it->second;
                 // Add space after operator if needed (look ahead to see if next token exists)
-                if (i + 1 < tokens.size() && tokens[i + 1] != 0x00) {
+                if (i + 1 < tokens.size() && tokens[i + 1] != 0x00 && 
+                    it->second != "(" && it->second != ")") {
                     result << " ";
                 }
                 i++;
             } else {
-                // Regular character
-                result << static_cast<char>(token);
+                // Regular character - could be part of identifier, punctuation, etc.
+                if (token >= 32 && token <= 126) { // Printable ASCII
+                    result << static_cast<char>(token);
+                } else {
+                    result << "[CHAR:" << std::hex << (int)token << std::dec << "]";
+                }
                 i++;
             }
         }
@@ -527,14 +544,26 @@ Tokenizer::Token Tokenizer::scanToken() {
         return scanComment();
     }
     
-    // Check for operators
-    if (operatorTokens.find(currentChar) != operatorTokens.end()) {
+    // Check for operators and punctuation
+    if (operatorTokens.find(currentChar) != operatorTokens.end() || 
+        currentChar == '(' || currentChar == ')' || currentChar == ',' || 
+        currentChar == ';' || currentChar == ':') {
         return scanOperator();
     }
     
     // Check for identifiers/reserved words
     if (isAlpha(currentChar)) {
         return scanIdentifier();
+    }
+    
+    // Check for hexadecimal numbers (&H prefix)
+    if (currentChar == '&' && !isAtEnd()) {
+        char nextChar = peekChar(1);
+        if (nextChar == 'H' || nextChar == 'h') {
+            return scanHexNumber();
+        } else if (nextChar == 'O' || nextChar == 'o' || isDigit(nextChar)) {
+            return scanOctalNumber();
+        }
     }
     
     // Skip unknown characters
@@ -547,49 +576,196 @@ Tokenizer::Token Tokenizer::scanNumber() {
     std::string numStr;
     bool hasDecimal = false;
     bool hasExponent = false;
+    TokenType finalType = TOKEN_NUMBER_INT;
     
-    while (isDigit(currentChar) || currentChar == '.' || 
-           currentChar == 'E' || currentChar == 'e' ||
-           currentChar == '+' || currentChar == '-') {
-        
-        if (currentChar == '.') {
-            if (hasDecimal || hasExponent) break;
-            hasDecimal = true;
-        } else if (currentChar == 'E' || currentChar == 'e') {
-            if (hasExponent) break;
-            hasExponent = true;
-            numStr += currentChar;
-            advance();
-            if (currentChar == '+' || currentChar == '-') {
-                numStr += currentChar;
-                advance();
-            }
-            continue;
-        }
-        
+    // Scan digits before decimal point
+    while (isDigit(currentChar)) {
         numStr += currentChar;
         advance();
     }
     
-    Token token(TOKEN_NUMBER_INT, numStr, start, currentPosition - start);
-    
-    // Determine number type and encode
-    if (hasDecimal || hasExponent) {
-        // Check for double precision indicator (D suffix or # suffix)
-        if (currentChar == 'D' || currentChar == '#') {
-            token.type = TOKEN_NUMBER_DOUBLE;
-            token.text += currentChar;
-            token.length++;
+    // Check for decimal point
+    if (currentChar == '.') {
+        hasDecimal = true;
+        finalType = TOKEN_NUMBER_FLOAT;
+        numStr += currentChar;
+        advance();
+        
+        // Scan digits after decimal point
+        while (isDigit(currentChar)) {
+            numStr += currentChar;
             advance();
-        } else {
-            token.type = TOKEN_NUMBER_FLOAT;
         }
     }
     
-    // Encode the number into bytes
-    double value = std::stod(numStr);
-    token.bytes = encodeNumber(value, token.type);
+    // Check for exponent (E or D)
+    if (currentChar == 'E' || currentChar == 'e' || currentChar == 'D' || currentChar == 'd') {
+        hasExponent = true;
+        if (currentChar == 'D' || currentChar == 'd') {
+            finalType = TOKEN_NUMBER_DOUBLE;
+        } else {
+            finalType = TOKEN_NUMBER_FLOAT;
+        }
+        
+        numStr += std::toupper(currentChar); // Normalize to uppercase
+        advance();
+        
+        // Optional sign after exponent
+        if (currentChar == '+' || currentChar == '-') {
+            numStr += currentChar;
+            advance();
+        }
+        
+        // Scan exponent digits
+        bool hasExpDigits = false;
+        while (isDigit(currentChar)) {
+            hasExpDigits = true;
+            numStr += currentChar;
+            advance();
+        }
+        
+        // If no digits after E/D, it's an error but we'll treat as identifier
+        if (!hasExpDigits) {
+            error("Invalid number format: missing exponent digits");
+        }
+    }
     
+    // Check for type suffix (!#%)
+    if (currentChar == '%') {
+        finalType = TOKEN_NUMBER_INT;
+        advance();
+    } else if (currentChar == '!') {
+        finalType = TOKEN_NUMBER_FLOAT;
+        advance();
+    } else if (currentChar == '#') {
+        finalType = TOKEN_NUMBER_DOUBLE;
+        advance();
+    }
+    
+    // For integers without decimal/exponent, check range
+    if (finalType == TOKEN_NUMBER_INT && !hasDecimal && !hasExponent) {
+        try {
+            long longVal = std::stol(numStr);
+            if (longVal < -32768 || longVal > 32767) {
+                finalType = TOKEN_NUMBER_FLOAT; // Promote to single precision
+            }
+        } catch (const std::exception&) {
+            finalType = TOKEN_NUMBER_FLOAT; // Promote on overflow
+        }
+    }
+    
+    Token token(finalType, numStr, start, currentPosition - start);
+    
+    // Encode the number into bytes
+    try {
+        double value = std::stod(numStr);
+        token.bytes = encodeNumber(value, finalType);
+    } catch (const std::exception&) {
+        error("Invalid number format: " + numStr);
+    }
+    
+    return token;
+}
+
+Tokenizer::Token Tokenizer::scanHexNumber() {
+    size_t start = currentPosition;
+    std::string numStr = "&H";
+    
+    advance(); // Skip '&'
+    advance(); // Skip 'H'
+    
+    // Scan hex digits
+    bool hasDigits = false;
+    while (!isAtEnd() && 
+           ((currentChar >= '0' && currentChar <= '9') ||
+            (currentChar >= 'A' && currentChar <= 'F') ||
+            (currentChar >= 'a' && currentChar <= 'f'))) {
+        hasDigits = true;
+        numStr += std::toupper(currentChar);
+        advance();
+    }
+    
+    if (!hasDigits) {
+        error("Invalid hexadecimal number: no digits after &H");
+    }
+    
+    Token token(TOKEN_NUMBER_INT, numStr, start, currentPosition - start);
+    
+    // Convert hex to integer
+    try {
+        std::string hexPart = numStr.substr(2); // Remove "&H"
+        long longVal = std::stol(hexPart, nullptr, 16);
+        
+        // Check if it fits in 16-bit signed integer
+        if (longVal >= -32768 && longVal <= 32767) {
+            token.bytes = encodeNumber(static_cast<double>(longVal), TOKEN_NUMBER_INT);
+        } else if (longVal >= 0 && longVal <= 65535) {
+            // Treat as unsigned 16-bit, but store as signed (GW-BASIC behavior)
+            int16_t signedVal = static_cast<int16_t>(static_cast<uint16_t>(longVal));
+            token.bytes = encodeNumber(static_cast<double>(signedVal), TOKEN_NUMBER_INT);
+        } else {
+            // Promote to single precision
+            token.type = TOKEN_NUMBER_FLOAT;
+            token.bytes = encodeNumber(static_cast<double>(longVal), TOKEN_NUMBER_FLOAT);
+        }
+    } catch (const std::exception&) {
+        error("Invalid hexadecimal number: " + numStr);
+    }
+    
+    return token;
+}
+
+Tokenizer::Token Tokenizer::scanOctalNumber() {
+    size_t start = currentPosition;
+    std::string numStr = "&";
+    
+    advance(); // Skip '&'
+    
+    // Optional 'O' prefix
+    if (currentChar == 'O' || currentChar == 'o') {
+        numStr += std::toupper(currentChar);
+        advance();
+    }
+    
+    // Scan octal digits
+    bool hasDigits = false;
+    while (!isAtEnd() && currentChar >= '0' && currentChar <= '7') {
+        hasDigits = true;
+        numStr += currentChar;
+        advance();
+    }
+    
+    if (!hasDigits) {
+        error("Invalid octal number: no digits after &");
+    }
+    
+    Token token(TOKEN_NUMBER_INT, numStr, start, currentPosition - start);
+    
+    // Convert octal to integer
+    try {
+        std::string octalPart = numStr.substr(1); // Remove "&"
+        if (octalPart[0] == 'O') {
+            octalPart = octalPart.substr(1); // Remove "O" if present
+        }
+        
+        long longVal = std::stol(octalPart, nullptr, 8);
+        
+        // Check if it fits in 16-bit signed integer
+        if (longVal >= -32768 && longVal <= 32767) {
+            token.bytes = encodeNumber(static_cast<double>(longVal), TOKEN_NUMBER_INT);
+        } else if (longVal >= 0 && longVal <= 65535) {
+            // Treat as unsigned 16-bit, but store as signed (GW-BASIC behavior)
+            int16_t signedVal = static_cast<int16_t>(static_cast<uint16_t>(longVal));
+            token.bytes = encodeNumber(static_cast<double>(signedVal), TOKEN_NUMBER_INT);
+        } else {
+            // Promote to single precision
+            token.type = TOKEN_NUMBER_FLOAT;
+            token.bytes = encodeNumber(static_cast<double>(longVal), TOKEN_NUMBER_FLOAT);
+        }
+    } catch (const std::exception&) {
+        error("Invalid octal number: " + numStr);
+    }
+
     return token;
 }
 
@@ -704,13 +880,39 @@ Tokenizer::Token Tokenizer::scanComment() {
 Tokenizer::Token Tokenizer::scanOperator() {
     size_t start = currentPosition;
     char op = currentChar;
+    std::string opStr(1, op);
+    
     advance();
     
-    Token token(TOKEN_OPERATOR, std::string(1, op), start, 1);
+    // Handle multi-character operators
+    if (op == '<' && !isAtEnd()) {
+        if (currentChar == '=') {
+            opStr = "<=";
+            advance();
+        } else if (currentChar == '>') {
+            opStr = "<>";
+            advance();
+        }
+    } else if (op == '>' && !isAtEnd() && currentChar == '=') {
+        opStr = ">=";
+        advance();
+    }
     
-    auto it = operatorTokens.find(op);
-    if (it != operatorTokens.end()) {
-        token.bytes.push_back(it->second);
+    Token token(TOKEN_OPERATOR, opStr, start, currentPosition - start);
+    
+    // For multi-character operators, we need to handle them specially
+    if (opStr == "<=") {
+        token.bytes.push_back(0xF2); // LEQUTK - less than or equal
+    } else if (opStr == ">=") {
+        token.bytes.push_back(0xF1); // GEQUTK - greater than or equal  
+    } else if (opStr == "<>") {
+        token.bytes.push_back(0xF3); // NETK - not equal
+    } else {
+        // Single character operator
+        auto it = operatorTokens.find(op);
+        if (it != operatorTokens.end()) {
+            token.bytes.push_back(it->second);
+        }
     }
     
     return token;
@@ -738,6 +940,7 @@ Tokenizer::Token Tokenizer::matchReservedWord(const std::string& word) {
 }
 
 bool Tokenizer::matchMultiWordToken(const std::string& word1, std::string& fullToken) {
+    // Handle "GO TO" -> "GOTO"
     if (word1 == "GO") {
         skipWhitespace();
         if (currentPosition + 1 < currentSource.length() &&
@@ -750,6 +953,13 @@ bool Tokenizer::matchMultiWordToken(const std::string& word1, std::string& fullT
         }
     }
     
+    // Handle "ELSE IF" -> Keep as separate tokens (not combined in GW-BASIC)
+    // Handle "END IF" -> Keep as separate tokens (not used in GW-BASIC)
+    
+    // Handle "ON ERROR" -> Keep as separate tokens for ON ERROR GOTO
+    // Handle "ON KEY" -> Keep as separate tokens for ON KEY GOSUB
+    
+    // No multi-word token found
     return false;
 }
 
@@ -813,9 +1023,22 @@ void Tokenizer::advance() {
 }
 
 void Tokenizer::skipWhitespace() {
-    while (!isAtEnd() && (currentChar == ' ' || currentChar == '\t' || 
-                          currentChar == '\r' || currentChar == '\n')) {
+    while (!isAtEnd() && (currentChar == ' ' || currentChar == '\t')) {
         advance();
+    }
+    // Note: We don't skip \r or \n here since they can be significant 
+    // for line endings and statement separation
+}
+
+void Tokenizer::handleLineEnd() {
+    // Handle various line ending formats (LF, CRLF, CR)
+    if (currentChar == '\r') {
+        advance();
+        if (!isAtEnd() && currentChar == '\n') {
+            advance(); // Handle CRLF
+        }
+    } else if (currentChar == '\n') {
+        advance(); // Handle LF
     }
 }
 
