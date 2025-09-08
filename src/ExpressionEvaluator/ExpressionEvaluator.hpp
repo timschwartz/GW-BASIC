@@ -35,6 +35,9 @@ struct Env {
     // Optional: external function resolver for built-in functions
     std::function<bool(const std::string& name, const std::vector<Value>& args, Value& out)> callFunc;
     
+    // Optional: array element resolver for subscripted variables
+    std::function<bool(const std::string& name, const std::vector<Value>& indices, Value& out)> getArrayElem;
+    
     // Optional: numeric engine for math functions
     std::shared_ptr<NumericEngine> numericEngine;
 };
@@ -79,6 +82,10 @@ private:
     Value parseBuiltinFunction(const std::string& funcName, const std::vector<Value>& args, Env& env);
     std::vector<Value> parseArgumentList(const std::vector<uint8_t>& b, size_t& pos, Env& env);
     bool atEnd(const std::vector<uint8_t>& b, size_t pos) const;
+
+    // Array element access
+    Value parseArrayAccess(const std::string& arrayName, const std::vector<uint8_t>& b, size_t& pos, Env& env);
+    bool isKnownFunction(const std::string& name) const;
 
     // Utilities
     static void skipSpaces(const std::vector<uint8_t>& b, size_t& pos);

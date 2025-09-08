@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <sstream>
 #include <random>
+#include <unordered_set>
 
 #include "../Tokenizer/Tokenizer.hpp"
 #include "../NumericEngine/NumericEngine.hpp"
@@ -170,18 +171,20 @@ std::string ExpressionEvaluator::readIdentifier(const std::vector<uint8_t>& b, s
 std::vector<Value> ExpressionEvaluator::parseArgumentList(const std::vector<uint8_t>& b, size_t& pos, Env& env) {
     std::vector<Value> args;
     
-    // Expect opening parenthesis
+    // Expect opening parenthesis or square bracket
     skipSpaces(b, pos);
-    if (atEnd(b, pos) || b[pos] != '(') {
+    if (atEnd(b, pos) || (b[pos] != '(' && b[pos] != '[')) {
         return args; // No arguments
     }
     
-    ++pos; // consume '('
+    char openChar = static_cast<char>(b[pos]);
+    char closeChar = (openChar == '(') ? ')' : ']';
+    ++pos; // consume opening character
     skipSpaces(b, pos);
     
     // Handle empty argument list
-    if (!atEnd(b, pos) && b[pos] == ')') {
-        ++pos; // consume ')'
+    if (!atEnd(b, pos) && b[pos] == static_cast<uint8_t>(closeChar)) {
+        ++pos; // consume closing character
         return args;
     }
     
@@ -189,12 +192,12 @@ std::vector<Value> ExpressionEvaluator::parseArgumentList(const std::vector<uint
     while (!atEnd(b, pos)) {
         skipSpaces(b, pos);
         if (atEnd(b, pos)) {
-            throw BasicError(2, "Syntax error: missing closing parenthesis", pos);
+            throw BasicError(2, "Syntax error: missing closing " + std::string(1, closeChar), pos);
         }
         
-        // Check for closing parenthesis before parsing argument
-        if (b[pos] == ')') {
-            ++pos; // consume ')'
+        // Check for closing character before parsing argument
+        if (b[pos] == static_cast<uint8_t>(closeChar)) {
+            ++pos; // consume closing character
             break;
         }
         
@@ -203,17 +206,17 @@ std::vector<Value> ExpressionEvaluator::parseArgumentList(const std::vector<uint
         
         skipSpaces(b, pos);
         if (atEnd(b, pos)) {
-            throw BasicError(2, "Syntax error: missing closing parenthesis", pos);
+            throw BasicError(2, "Syntax error: missing closing " + std::string(1, closeChar), pos);
         }
         
-        if (b[pos] == ')') {
-            ++pos; // consume ')'
+        if (b[pos] == static_cast<uint8_t>(closeChar)) {
+            ++pos; // consume closing character
             break;
         } else if (b[pos] == ',') {
             ++pos; // consume ','
             skipSpaces(b, pos);
         } else {
-            throw BasicError(2, "Syntax error: expected ',' or ')'", pos);
+            throw BasicError(2, "Syntax error: expected ',' or '" + std::string(1, closeChar) + "'", pos);
         }
     }
     
@@ -663,18 +666,38 @@ Value ExpressionEvaluator::parsePrimary(const std::vector<uint8_t>& b, size_t& p
         return parseFunction(funcName, b, pos, env);
     }
 
-    // Identifier -> variable or function call
+    // Identifier -> variable, function call, or array access
     if (isAsciiAlpha(t)) {
         size_t savedPos = pos;
         auto id = readIdentifier(b, pos);
         
-        // Check if this is followed by an opening parenthesis (function call)
+        // Check if this is followed by an opening parenthesis
         skipSpaces(b, pos);
-        if (!atEnd(b, pos) && b[pos] == '(') {
-            return parseFunction(id, b, pos, env);
+        if (!atEnd(b, pos) && (b[pos] == '(' || b[pos] == '[')) {
+            // Decide between function call and array access
+            if (isKnownFunction(id)) {
+                // Known function - always treat as function call
+                return parseFunction(id, b, pos, env);
+            } else {
+                // Not a known function - could be array access
+                // Try array access first, fall back to function if array doesn't exist
+                pos = savedPos;
+                id = readIdentifier(b, pos);
+                skipSpaces(b, pos);
+                
+                try {
+                    return parseArrayAccess(id, b, pos, env);
+                } catch (const BasicError& e) {
+                    // Array access failed, try as function call
+                    pos = savedPos;
+                    id = readIdentifier(b, pos);
+                    skipSpaces(b, pos);
+                    return parseFunction(id, b, pos, env);
+                }
+            }
         }
         
-        // Not a function call, treat as variable
+        // Not followed by parentheses - treat as simple variable
         pos = savedPos;
         id = readIdentifier(b, pos);
         
@@ -765,6 +788,44 @@ Value ExpressionEvaluator::parseExpression(const std::vector<uint8_t>& b, size_t
     }
 
     return lhs;
+}
+
+bool ExpressionEvaluator::isKnownFunction(const std::string& name) const {
+    // List of known built-in functions that should always be treated as function calls
+    // when followed by parentheses, never as array access
+    static const std::unordered_set<std::string> functions = {
+        "SIN", "COS", "TAN", "ATN", "EXP", "LOG", "SQR", "ABS", "SGN", "INT", "FIX", "RND",
+        "LEN", "ASC", "CHR$", "STR$", "VAL", "LEFT$", "RIGHT$", "MID$", "INSTR", "STRING$",
+        "SPACE$", "TAB", "SPC", "POS", "CSRLIN", "EOF", "LOC", "LOF", "FRE", "PEEK", "INP",
+        "POINT", "SCREEN", "VARPTR", "VARPTR$", "INPUT$", "INKEY$", "TIME$", "DATE$",
+        "TIMER", "CINT", "CSNG", "CDBL", "HEX$", "OCT$", "LSET", "RSET", "LTRIM$", "RTRIM$"
+    };
+    
+    std::string upper = name;
+    std::transform(upper.begin(), upper.end(), upper.begin(), 
+                   [](unsigned char c) { return std::toupper(c); });
+    
+    return functions.find(upper) != functions.end();
+}
+
+Value ExpressionEvaluator::parseArrayAccess(const std::string& arrayName, const std::vector<uint8_t>& b, size_t& pos, Env& env) {
+    // Parse array subscripts: A(1), B(2,3), etc.
+    std::vector<Value> indices = parseArgumentList(b, pos, env);
+    
+    if (indices.empty()) {
+        throw BasicError(2, "Syntax error: array subscripts expected", pos);
+    }
+    
+    // Try external array resolver first
+    if (env.getArrayElem) {
+        Value result{};
+        if (env.getArrayElem(arrayName, indices, result)) {
+            return result;
+        }
+    }
+    
+    // Fallback: treat as undefined array
+    throw BasicError(2, "Undefined array: " + arrayName, pos);
 }
 
 } // namespace expr

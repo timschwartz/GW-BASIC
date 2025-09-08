@@ -2,6 +2,7 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <unordered_map>
 
 #include "ExpressionEvaluator.hpp"
 
@@ -162,4 +163,54 @@ TEST_CASE("ExpressionEvaluator type conversion functions", "[expr]") {
     auto r3 = ev.evaluate(asciiExpr("STR$(42)"), 0, env);
     REQUIRE(std::holds_alternative<Str>(r3.value));
     REQUIRE(std::get<Str>(r3.value).v == " 42");  // GW-BASIC adds leading space for positive numbers
+}
+
+TEST_CASE("ExpressionEvaluator array element access", "[expr]") {
+    ExpressionEvaluator ev(nullptr);
+    Env env;
+
+    // Simulate a simple 1D array A(0) = 10, A(1) = 20, A(2) = 30
+    std::unordered_map<std::string, std::vector<int16_t>> arrays;
+    arrays["A"] = {10, 20, 30};
+    arrays["B"] = {100, 200, 300, 400};
+
+    // Set up array element resolver
+    env.getArrayElem = [&arrays](const std::string& name, const std::vector<Value>& indices, Value& out) -> bool {
+        auto it = arrays.find(name);
+        if (it == arrays.end()) return false;
+        
+        if (indices.size() != 1) return false; // Only 1D arrays for this test
+        
+        if (!std::holds_alternative<Int16>(indices[0])) return false;
+        int16_t index = std::get<Int16>(indices[0]).v;
+        
+        if (index < 0 || index >= static_cast<int16_t>(it->second.size())) return false;
+        
+        out = Int16{it->second[index]};
+        return true;
+    };
+
+    // Test basic array access
+    auto r1 = ev.evaluate(asciiExpr("A(0)"), 0, env);
+    REQUIRE(std::holds_alternative<Int16>(r1.value));
+    REQUIRE(std::get<Int16>(r1.value).v == 10);
+
+    auto r2 = ev.evaluate(asciiExpr("A(2)"), 0, env);
+    REQUIRE(std::holds_alternative<Int16>(r2.value));
+    REQUIRE(std::get<Int16>(r2.value).v == 30);
+
+    // Test square bracket syntax
+    auto r3 = ev.evaluate(asciiExpr("B[1]"), 0, env);
+    REQUIRE(std::holds_alternative<Int16>(r3.value));
+    REQUIRE(std::get<Int16>(r3.value).v == 200);
+
+    // Test expression in array subscript
+    auto r4 = ev.evaluate(asciiExpr("A(1+1)"), 0, env);
+    REQUIRE(std::holds_alternative<Int16>(r4.value));
+    REQUIRE(std::get<Int16>(r4.value).v == 30);
+
+    // Test array access in arithmetic
+    auto r5 = ev.evaluate(asciiExpr("A(0) + A(1)"), 0, env);
+    REQUIRE(std::holds_alternative<Int16>(r5.value));
+    REQUIRE(std::get<Int16>(r5.value).v == 30);
 }
