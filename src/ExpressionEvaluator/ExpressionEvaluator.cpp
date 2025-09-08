@@ -5,8 +5,12 @@
 #include <stdexcept>
 #include <cmath>
 #include <limits>
+#include <algorithm>
+#include <sstream>
+#include <random>
 
 #include "../Tokenizer/Tokenizer.hpp"
+#include "../NumericEngine/NumericEngine.hpp"
 
 namespace expr {
 
@@ -96,6 +100,58 @@ bool ExpressionEvaluator::tryDecodeString(const std::vector<uint8_t>& b, size_t&
     return true;
 }
 
+bool ExpressionEvaluator::tryDecodeFunction(const std::vector<uint8_t>& b, size_t pos, std::string& funcName) {
+    if (pos >= b.size()) return false;
+    
+    // Check for two-byte function token (0xFF followed by function code)
+    if (b[pos] == 0xFF && pos + 1 < b.size()) {
+        uint8_t funcCode = b[pos + 1];
+        // Map function codes to names (based on Tokenizer.cpp)
+        switch (funcCode) {
+            case 0x00: funcName = "LEFT$"; return true;
+            case 0x01: funcName = "RIGHT$"; return true;
+            case 0x02: funcName = "MID$"; return true;
+            case 0x03: funcName = "SGN"; return true;
+            case 0x04: funcName = "INT"; return true;
+            case 0x05: funcName = "ABS"; return true;
+            case 0x06: funcName = "SQR"; return true;
+            case 0x07: funcName = "RND"; return true;
+            case 0x08: funcName = "SIN"; return true;
+            case 0x09: funcName = "LOG"; return true;
+            case 0x0A: funcName = "EXP"; return true;
+            case 0x0B: funcName = "COS"; return true;
+            case 0x0C: funcName = "TAN"; return true;
+            case 0x0D: funcName = "ATN"; return true;
+            case 0x0E: funcName = "FRE"; return true;
+            case 0x0F: funcName = "INP"; return true;
+            case 0x10: funcName = "POS"; return true;
+            case 0x11: funcName = "LEN"; return true;
+            case 0x12: funcName = "STR$"; return true;
+            case 0x13: funcName = "VAL"; return true;
+            case 0x14: funcName = "ASC"; return true;
+            case 0x15: funcName = "CHR$"; return true;
+            case 0x16: funcName = "PEEK"; return true;
+            case 0x17: funcName = "SPACE$"; return true;
+            case 0x18: funcName = "OCT$"; return true;
+            case 0x19: funcName = "HEX$"; return true;
+            case 0x1A: funcName = "LPOS"; return true;
+            case 0x1B: funcName = "CINT"; return true;
+            case 0x1C: funcName = "CSNG"; return true;
+            case 0x1D: funcName = "CDBL"; return true;
+            case 0x1E: funcName = "FIX"; return true;
+            case 0x1F: funcName = "PEN"; return true;
+            case 0x20: funcName = "STICK"; return true;
+            case 0x21: funcName = "STRIG"; return true;
+            case 0x22: funcName = "EOF"; return true;
+            case 0x23: funcName = "LOC"; return true;
+            case 0x24: funcName = "LOF"; return true;
+            default: return false;
+        }
+    }
+    
+    return false;
+}
+
 std::string ExpressionEvaluator::readIdentifier(const std::vector<uint8_t>& b, size_t& pos) {
     std::string id;
     if (pos < b.size() && isAsciiAlpha(b[pos])) {
@@ -109,6 +165,306 @@ std::string ExpressionEvaluator::readIdentifier(const std::vector<uint8_t>& b, s
         }
     }
     return id;
+}
+
+std::vector<Value> ExpressionEvaluator::parseArgumentList(const std::vector<uint8_t>& b, size_t& pos, Env& env) {
+    std::vector<Value> args;
+    
+    // Expect opening parenthesis
+    skipSpaces(b, pos);
+    if (atEnd(b, pos) || b[pos] != '(') {
+        return args; // No arguments
+    }
+    
+    ++pos; // consume '('
+    skipSpaces(b, pos);
+    
+    // Handle empty argument list
+    if (!atEnd(b, pos) && b[pos] == ')') {
+        ++pos; // consume ')'
+        return args;
+    }
+    
+    // Parse arguments separated by commas
+    while (!atEnd(b, pos)) {
+        skipSpaces(b, pos);
+        if (atEnd(b, pos)) {
+            throw BasicError(2, "Syntax error: missing closing parenthesis", pos);
+        }
+        
+        // Check for closing parenthesis before parsing argument
+        if (b[pos] == ')') {
+            ++pos; // consume ')'
+            break;
+        }
+        
+        auto arg = parseExpression(b, pos, env, 0);
+        args.push_back(std::move(arg));
+        
+        skipSpaces(b, pos);
+        if (atEnd(b, pos)) {
+            throw BasicError(2, "Syntax error: missing closing parenthesis", pos);
+        }
+        
+        if (b[pos] == ')') {
+            ++pos; // consume ')'
+            break;
+        } else if (b[pos] == ',') {
+            ++pos; // consume ','
+            skipSpaces(b, pos);
+        } else {
+            throw BasicError(2, "Syntax error: expected ',' or ')'", pos);
+        }
+    }
+    
+    return args;
+}
+
+Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, const std::vector<Value>& args, Env& env) {
+    // Math functions - direct implementations
+    if (funcName == "ABS" && args.size() == 1) {
+        if (isNumeric(args[0])) {
+            double val = toDouble(args[0]);
+            return Double{std::abs(val)};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "SGN" && args.size() == 1) {
+        if (isNumeric(args[0])) {
+            double val = toDouble(args[0]);
+            int16_t result = (val > 0) ? 1 : (val < 0) ? -1 : 0;
+            return Int16{result};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "INT" && args.size() == 1) {
+        if (isNumeric(args[0])) {
+            double val = toDouble(args[0]);
+            return Int16{static_cast<int16_t>(std::floor(val))};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "FIX" && args.size() == 1) {
+        if (isNumeric(args[0])) {
+            double val = toDouble(args[0]);
+            return Int16{static_cast<int16_t>(std::trunc(val))};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "SQR" && args.size() == 1) {
+        if (isNumeric(args[0])) {
+            double val = toDouble(args[0]);
+            if (val < 0) throw BasicError(5, "Illegal function call", 0);
+            return Double{std::sqrt(val)};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "SIN" && args.size() == 1) {
+        if (isNumeric(args[0])) {
+            double val = toDouble(args[0]);
+            return Double{std::sin(val)};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "COS" && args.size() == 1) {
+        if (isNumeric(args[0])) {
+            double val = toDouble(args[0]);
+            return Double{std::cos(val)};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "TAN" && args.size() == 1) {
+        if (isNumeric(args[0])) {
+            double val = toDouble(args[0]);
+            return Double{std::tan(val)};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "ATN" && args.size() == 1) {
+        if (isNumeric(args[0])) {
+            double val = toDouble(args[0]);
+            return Double{std::atan(val)};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "LOG" && args.size() == 1) {
+        if (isNumeric(args[0])) {
+            double val = toDouble(args[0]);
+            if (val <= 0) throw BasicError(5, "Illegal function call", 0);
+            return Double{std::log(val)};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "EXP" && args.size() == 1) {
+        if (isNumeric(args[0])) {
+            double val = toDouble(args[0]);
+            return Double{std::exp(val)};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "RND") {
+        // Simple fallback RND implementation
+        static std::mt19937 gen(std::random_device{}());
+        std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+        return Single{dist(gen)};
+    }
+    
+    // String functions (basic implementations)
+    if (funcName == "LEN" && args.size() == 1) {
+        if (std::holds_alternative<Str>(args[0])) {
+            return Int16{static_cast<int16_t>(std::get<Str>(args[0]).v.length())};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "ASC" && args.size() == 1) {
+        if (std::holds_alternative<Str>(args[0])) {
+            const auto& str = std::get<Str>(args[0]).v;
+            if (str.empty()) throw BasicError(5, "Illegal function call", 0);
+            return Int16{static_cast<int16_t>(static_cast<unsigned char>(str[0]))};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "CHR$" && args.size() == 1) {
+        if (isNumeric(args[0])) {
+            int16_t code = toInt16(args[0]);
+            if (code < 0 || code > 255) throw BasicError(5, "Illegal function call", 0);
+            return Str{std::string(1, static_cast<char>(code))};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "STR$" && args.size() == 1) {
+        if (isNumeric(args[0])) {
+            std::ostringstream oss;
+            std::visit([&oss](auto&& arg) {
+                using T = std::decay_t<decltype(arg)>;
+                if constexpr (std::is_same_v<T, Int16>) oss << arg.v;
+                if constexpr (std::is_same_v<T, Single>) oss << arg.v;
+                if constexpr (std::is_same_v<T, Double>) oss << arg.v;
+            }, args[0]);
+            std::string result = oss.str();
+            if (result[0] != '-') result = " " + result; // Add leading space for positive numbers
+            return Str{result};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "VAL" && args.size() == 1) {
+        if (std::holds_alternative<Str>(args[0])) {
+            const auto& str = std::get<Str>(args[0]).v;
+            try {
+                // Try parsing as integer first
+                if (str.find('.') == std::string::npos && str.find('e') == std::string::npos && str.find('E') == std::string::npos) {
+                    long val = std::stol(str);
+                    if (val >= std::numeric_limits<int16_t>::min() && val <= std::numeric_limits<int16_t>::max()) {
+                        return Int16{static_cast<int16_t>(val)};
+                    }
+                }
+                // Parse as double
+                double val = std::stod(str);
+                return Double{val};
+            } catch (...) {
+                return Int16{0}; // VAL returns 0 for invalid strings
+            }
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "LEFT$" && args.size() == 2) {
+        if (std::holds_alternative<Str>(args[0]) && isNumeric(args[1])) {
+            const auto& str = std::get<Str>(args[0]).v;
+            int16_t len = toInt16(args[1]);
+            if (len < 0) throw BasicError(5, "Illegal function call", 0);
+            if (len >= static_cast<int16_t>(str.length())) return args[0];
+            return Str{str.substr(0, len)};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "RIGHT$" && args.size() == 2) {
+        if (std::holds_alternative<Str>(args[0]) && isNumeric(args[1])) {
+            const auto& str = std::get<Str>(args[0]).v;
+            int16_t len = toInt16(args[1]);
+            if (len < 0) throw BasicError(5, "Illegal function call", 0);
+            if (len >= static_cast<int16_t>(str.length())) return args[0];
+            return Str{str.substr(str.length() - len)};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "MID$" && (args.size() == 2 || args.size() == 3)) {
+        if (std::holds_alternative<Str>(args[0]) && isNumeric(args[1])) {
+            const auto& str = std::get<Str>(args[0]).v;
+            int16_t start = toInt16(args[1]) - 1; // GW-BASIC uses 1-based indexing
+            if (start < 0) throw BasicError(5, "Illegal function call", 0);
+            if (start >= static_cast<int16_t>(str.length())) return Str{""};
+            
+            if (args.size() == 3) {
+                if (isNumeric(args[2])) {
+                    int16_t len = toInt16(args[2]);
+                    if (len < 0) throw BasicError(5, "Illegal function call", 0);
+                    return Str{str.substr(start, len)};
+                }
+                throw BasicError(13, "Type mismatch", 0);
+            } else {
+                return Str{str.substr(start)};
+            }
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    // Type conversion functions
+    if (funcName == "CINT" && args.size() == 1) {
+        if (isNumeric(args[0])) {
+            return Int16{toInt16(args[0])};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "CSNG" && args.size() == 1) {
+        if (isNumeric(args[0])) {
+            return Single{static_cast<float>(toDouble(args[0]))};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (funcName == "CDBL" && args.size() == 1) {
+        if (isNumeric(args[0])) {
+            return Double{toDouble(args[0])};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    throw BasicError(2, "Unknown function: " + funcName, 0);
+}
+
+Value ExpressionEvaluator::parseFunction(const std::string& funcName, const std::vector<uint8_t>& b, size_t& pos, Env& env) {
+    // Parse argument list
+    auto args = parseArgumentList(b, pos, env);
+    
+    // Try external function resolver first
+    if (env.callFunc) {
+        Value result;
+        if (env.callFunc(funcName, args, result)) {
+            return result;
+        }
+    }
+    
+    // Try built-in functions
+    return parseBuiltinFunction(funcName, args, env);
 }
 
 ExpressionEvaluator::OpInfo ExpressionEvaluator::peekOperator(const std::vector<uint8_t>& b, size_t pos) const {
@@ -257,14 +613,38 @@ Value ExpressionEvaluator::parsePrimary(const std::vector<uint8_t>& b, size_t& p
         return Int16{static_cast<int16_t>(~bint)}; // In BASIC, NOT flips all bits; for booleans, ~(-1)=0, ~(0)=-1
     }
 
-    // ASCII integer literal
+    // ASCII integer/floating point literal
     if (isDigitByte(t)) {
-        int value = 0;
+        double value = 0.0;
+        bool isFloat = false;
+        
+        // Parse integer part
         while (!atEnd(b, pos) && isAsciiDigit(b[pos])) {
-            value = value * 10 + (b[pos] - '0');
+            value = value * 10.0 + (b[pos] - '0');
             ++pos;
         }
-        return Int16{static_cast<int16_t>(value)};
+        
+        // Check for decimal point
+        if (!atEnd(b, pos) && b[pos] == '.') {
+            isFloat = true;
+            ++pos; // consume '.'
+            double fraction = 0.0;
+            double divisor = 10.0;
+            
+            // Parse fractional part
+            while (!atEnd(b, pos) && isAsciiDigit(b[pos])) {
+                fraction += (b[pos] - '0') / divisor;
+                divisor *= 10.0;
+                ++pos;
+            }
+            value += fraction;
+        }
+        
+        if (isFloat) {
+            return Double{value};
+        } else {
+            return Int16{static_cast<int16_t>(value)};
+        }
     }
 
     // Parenthesized expression
@@ -276,9 +656,28 @@ Value ExpressionEvaluator::parsePrimary(const std::vector<uint8_t>& b, size_t& p
         return inner;
     }
 
-    // Identifier -> variable
+    // Check for tokenized function call
+    std::string funcName;
+    if (tryDecodeFunction(b, pos, funcName)) {
+        pos += 2; // consume function token (0xFF + function code)
+        return parseFunction(funcName, b, pos, env);
+    }
+
+    // Identifier -> variable or function call
     if (isAsciiAlpha(t)) {
+        size_t savedPos = pos;
         auto id = readIdentifier(b, pos);
+        
+        // Check if this is followed by an opening parenthesis (function call)
+        skipSpaces(b, pos);
+        if (!atEnd(b, pos) && b[pos] == '(') {
+            return parseFunction(id, b, pos, env);
+        }
+        
+        // Not a function call, treat as variable
+        pos = savedPos;
+        id = readIdentifier(b, pos);
+        
         // Try external resolver first
         if (env.getVar) {
             Value ext{};

@@ -12,6 +12,9 @@
 
 class Tokenizer;
 
+// Forward declarations for integration
+class NumericEngine;
+
 namespace expr {
 
 // Basic runtime value types for GW-BASIC
@@ -28,6 +31,12 @@ struct Env {
     // Optional: external variable resolver; if set, used before local map.
     std::function<bool(const std::string& name, Value& out)> getVar;
     std::unordered_map<std::string, Value> vars; // fallback/local storage
+    
+    // Optional: external function resolver for built-in functions
+    std::function<bool(const std::string& name, const std::vector<Value>& args, Value& out)> callFunc;
+    
+    // Optional: numeric engine for math functions
+    std::shared_ptr<NumericEngine> numericEngine;
 };
 
 // Evaluation result with next token position
@@ -66,6 +75,9 @@ private:
 
     // Primaries and helpers
     Value parsePrimary(const std::vector<uint8_t>& b, size_t& pos, Env& env);
+    Value parseFunction(const std::string& funcName, const std::vector<uint8_t>& b, size_t& pos, Env& env);
+    Value parseBuiltinFunction(const std::string& funcName, const std::vector<Value>& args, Env& env);
+    std::vector<Value> parseArgumentList(const std::vector<uint8_t>& b, size_t& pos, Env& env);
     bool atEnd(const std::vector<uint8_t>& b, size_t pos) const;
 
     // Utilities
@@ -78,6 +90,7 @@ private:
     // Token decoding helpers for Tokenizer-encoded numbers/strings
     static bool tryDecodeNumber(const std::vector<uint8_t>& b, size_t& pos, Value& out);
     static bool tryDecodeString(const std::vector<uint8_t>& b, size_t& pos, Value& out);
+    static bool tryDecodeFunction(const std::vector<uint8_t>& b, size_t pos, std::string& funcName);
     static std::string readIdentifier(const std::vector<uint8_t>& b, size_t& pos);
 
     // Operator handling

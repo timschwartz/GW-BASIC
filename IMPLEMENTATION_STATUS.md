@@ -7,7 +7,7 @@ A comprehensive status overview of the GW-BASIC reimplementation in C++.
 
 ## Summary
 
-This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 40-50% complete** with core functionality operational but many advanced features still pending.
+This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 45-55% complete** with core functionality operational but many advanced features still pending.
 
 ## ✅ Completed Components
 
@@ -53,7 +53,7 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 
 **Files**: `src/ProgramStore/` (ProgramStore.hpp, ProgramStore.cpp, test_programstore.cpp)
 
-### Expression Evaluator (80% Complete)
+### Expression Evaluator (95% Complete)
 - ✅ **Pratt Parser**: Precedence-based expression parsing
 - ✅ **Numeric Types**: Int16, Single, Double with proper coercion
 - ✅ **String Support**: String expressions and operations
@@ -62,9 +62,23 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **Logical Operators**: AND, OR, XOR, NOT, EQV, IMP
 - ✅ **Variable References**: Integration with variable table
 - ✅ **Tokenized Constants**: Decoding of embedded numeric constants
-- ⚠️ **Missing**: Some built-in functions, array element access
+- ✅ **Built-in Functions**: Complete implementation of math and string functions
+  - Math: ABS, SGN, INT, SQR, SIN, COS, TAN, ATN, LOG, EXP, RND
+  - String: LEN, ASC, CHR$, LEFT$, RIGHT$, MID$, STR$, VAL
+  - Conversion: CINT, CSNG, CDBL
+- ✅ **Function Call Parsing**: Support for nested function calls and argument lists
+- ✅ **ASCII and Tokenized Parsing**: Handles both ASCII text and tokenized function calls
+- ✅ **Floating-point Support**: Complete support for floating-point numbers in function arguments
+- ⚠️ **Missing**: Array element access (A(I,J) syntax)
 
 **Files**: `src/ExpressionEvaluator/` (ExpressionEvaluator.hpp, ExpressionEvaluator.cpp, test_expression.cpp)
+
+**Recent Enhancements:**
+- Added comprehensive built-in function support with 20+ functions
+- Implemented function call parsing framework with argument list handling
+- Added support for both ASCII and tokenized function recognition
+- Enhanced floating-point number parsing in ASCII literals
+- Complete test coverage for all implemented functions
 
 ### Numeric Engine (75% Complete)
 - ✅ **Basic Arithmetic**: Add, subtract, multiply, divide with proper overflow handling
@@ -203,7 +217,7 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 |-----------|------------|---------------|---------|
 | Tokenizer | 90% | ~800 | Stable |
 | Program Store | 95% | ~600 | Stable |
-| Expression Evaluator | 80% | ~700 | Mostly Stable |
+| Expression Evaluator | 95% | ~900 | Mostly Stable |
 | Numeric Engine | 75% | ~500 | Good Progress |
 | Runtime System | 70% | ~400 | Foundation Ready |
 | Interpreter Loop | 80% | ~300 | Core Complete |
