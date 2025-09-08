@@ -48,6 +48,12 @@ void DataManager::restore(uint16_t lineNumber) {
         return;
     }
     
+    // Special case: RESTORE 0 means restore to beginning (same as RESTORE without args)
+    if (lineNumber == 0) {
+        restore();
+        return;
+    }
+    
     // Find the specified line or the next line after it
     auto it = prog->findLine(lineNumber);
     if (!it.isValid()) {
