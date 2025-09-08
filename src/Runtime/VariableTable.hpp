@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include "Value.hpp"
+#include "StringHeap.hpp"
 
 namespace gwbasic {
 
@@ -65,9 +66,31 @@ struct VarSlot {
     // Array* array{nullptr}; // reserved for future integration
 };
 
-class VariableTable {
+class VariableTable : public StringRootProvider {
 public:
-    explicit VariableTable(DefaultTypeTable* deftbl) : deftbl_(deftbl) {}
+    explicit VariableTable(DefaultTypeTable* deftbl, StringHeap* stringHeap = nullptr) 
+        : deftbl_(deftbl), stringHeap_(stringHeap) {
+        if (stringHeap_) {
+            stringHeap_->addRootProvider(this);
+        }
+    }
+
+    ~VariableTable() {
+        if (stringHeap_) {
+            stringHeap_->removeRootProvider(this);
+        }
+    }
+
+    // Set or change the associated string heap
+    void setStringHeap(StringHeap* heap) {
+        if (stringHeap_) {
+            stringHeap_->removeRootProvider(this);
+        }
+        stringHeap_ = heap;
+        if (stringHeap_) {
+            stringHeap_->addRootProvider(this);
+        }
+    }
 
     // Resolve or create a scalar variable by name (may include suffix). Empty suffix => infer from DEFTBL.
     VarSlot& getOrCreate(const std::string& rawName) {
@@ -91,15 +114,60 @@ public:
         return &it->second;
     }
 
-    // For GC: enumerate all string roots currently stored in variables.
-    void collectStringRoots(std::vector<StrDesc*>& out) {
-        out.clear();
-        out.reserve(table_.size());
+    // Create a string variable with automatic heap allocation
+    bool createString(const std::string& varName, const char* value) {
+        if (!stringHeap_) return false;
+        
+        auto& slot = getOrCreate(varName);
+        if (slot.scalar.type != ScalarType::String) return false;
+        
+        StrDesc desc;
+        if (!stringHeap_->allocCopy(value, desc)) return false;
+        
+        slot.scalar.s = desc;
+        return true;
+    }
+
+    // Create a string variable with automatic heap allocation (from uint8_t*)
+    bool createString(const std::string& varName, const uint8_t* value, uint16_t len) {
+        if (!stringHeap_) return false;
+        
+        auto& slot = getOrCreate(varName);
+        if (slot.scalar.type != ScalarType::String) return false;
+        
+        StrDesc desc;
+        if (!stringHeap_->allocCopy(value, len, desc)) return false;
+        
+        slot.scalar.s = desc;
+        return true;
+    }
+
+    // Assign a string value that's already allocated in the heap
+    void assignString(const std::string& varName, const StrDesc& desc) {
+        auto& slot = getOrCreate(varName);
+        if (slot.scalar.type == ScalarType::String) {
+            slot.scalar.s = desc;
+        }
+    }
+
+    // Clear all variables (useful for NEW command)
+    void clear() {
+        table_.clear();
+    }
+
+    // Get the number of variables
+    std::size_t size() const {
+        return table_.size();
+    }
+
+    // StringRootProvider implementation
+    void collectStringRoots(std::vector<StrDesc*>& roots) override {
         for (auto& kv : table_) {
             VarSlot& v = kv.second;
             if (!v.isArray && v.scalar.type == ScalarType::String) {
-                out.push_back(&v.scalar.s);
+                roots.push_back(&v.scalar.s);
             }
+            // TODO: When arrays are implemented, also collect string array elements
         }
     }
 
@@ -137,6 +205,7 @@ private:
 
     std::unordered_map<SymbolKey, VarSlot, SymbolKeyHash> table_;
     DefaultTypeTable* deftbl_;
+    StringHeap* stringHeap_;
 };
 
 } // namespace gwbasic

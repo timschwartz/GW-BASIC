@@ -31,14 +31,11 @@ TEST_CASE("String assignment uses heap and GC roots include variables") {
 	uint8_t buf[32] = {0};
 	StringHeap heap(buf, sizeof buf);
 	DefaultTypeTable dt;
-	VariableTable vt(&dt);
+	VariableTable vt(&dt, &heap);
 
 	// Assign a string to S$
 	auto& s = vt.getOrCreate("S$");
-	StrDesc tmp;
-	const char* hello = "HELLO";
-	REQUIRE(heap.allocCopy(reinterpret_cast<const uint8_t*>(hello), 5, tmp));
-	s.scalar = Value::makeString(tmp);
+	REQUIRE(vt.createString("S$", "HELLO"));
 
 	// Collect roots and compact; pointer should remain valid and updated if needed
 	std::vector<StrDesc*> roots;
@@ -46,5 +43,5 @@ TEST_CASE("String assignment uses heap and GC roots include variables") {
 	REQUIRE(roots.size() == 1);
 	heap.compact(roots);
 	REQUIRE(s.scalar.s.len == 5);
-	REQUIRE(std::equal(s.scalar.s.ptr, s.scalar.s.ptr + 5, (const uint8_t*)hello));
+	REQUIRE(std::equal(s.scalar.s.ptr, s.scalar.s.ptr + 5, (const uint8_t*)"HELLO"));
 }
