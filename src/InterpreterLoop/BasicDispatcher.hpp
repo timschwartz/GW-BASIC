@@ -21,6 +21,7 @@
 #include "../Runtime/ArrayManager.hpp"
 #include "../Runtime/EventTraps.hpp"
 #include "../Runtime/DataManager.hpp"
+#include "../Runtime/FileManager.hpp"
 #include "../NumericEngine/NumericEngine.hpp"
 
 // A dispatcher for a subset of BASIC statements to exercise the loop.
@@ -41,7 +42,7 @@ public:
     using ColorCallback = std::function<bool(int, int)>; // foreground, background -> success
     
     BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr, ScreenModeCallback screenCb = nullptr, ColorCallback colorCb = nullptr)
-        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb), colorCallback(colorCb) {
+        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), fileManager(), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb), colorCallback(colorCb) {
         // Wire up cross-references
         vars.setStringHeap(&strHeap);
         vars.setArrayManager(&arrayManager);
@@ -142,6 +143,7 @@ private:
     gwbasic::RuntimeStack runtimeStack;
     gwbasic::EventTrapSystem eventTraps;
     gwbasic::DataManager dataManager;
+    gwbasic::FileManager fileManager;
     expr::Env env;
     PrintCallback printCallback;
     InputCallback inputCallback;
@@ -306,6 +308,8 @@ private:
         if (name == "ON") return doON(b, pos);
         if (name == "LOAD") return doLOAD(b, pos);
         if (name == "SAVE") return doSAVE(b, pos);
+        if (name == "OPEN") return doOPEN(b, pos);
+        if (name == "CLOSE") return doCLOSE(b, pos);
         if (name == "ERROR") return doERROR(b, pos);
         if (name == "RESUME") return doRESUME(b, pos);
         if (name == "KEY") return doKEY(b, pos);
@@ -316,14 +320,56 @@ private:
     }
 
     uint16_t doPRINT(const std::vector<uint8_t>& b, size_t& pos) {
-        // Check for PRINT USING syntax
+        // Check for PRINT# (file output) syntax first
         skipSpaces(b, pos);
+        uint8_t fileNumber = 0; // 0 means console output
+        bool isFileOutput = false;
+        
+    // Check if starts with # (file number) - ASCII or tokenized
+    if (!atEnd(b, pos) && (b[pos] == '#' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "#"))) {
+            ++pos; // consume #
+            skipSpaces(b, pos);
+            
+            // Parse file number
+            auto fileNumRes = ev.evaluate(b, pos, env);
+            pos = fileNumRes.nextPos;
+            
+            fileNumber = static_cast<uint8_t>(expr::ExpressionEvaluator::toInt16(fileNumRes.value));
+            isFileOutput = true;
+            
+            // Validate file number and check if open for output
+            if (!gwbasic::FileManager::isValidFileNumber(fileNumber)) {
+                throwBasicError(52, "Bad file number", pos);
+            }
+            
+            if (!fileManager.isFileOpen(fileNumber)) {
+                throwBasicError(62, "Input past end", pos);
+            }
+            
+            auto* fileHandle = fileManager.getFile(fileNumber);
+            if (!fileHandle || (fileHandle->mode != gwbasic::FileMode::OUTPUT && 
+                              fileHandle->mode != gwbasic::FileMode::APPEND)) {
+                throwBasicError(54, "Bad file mode", pos);
+            }
+            
+            skipSpaces(b, pos);
+            
+            // Expect comma after file number (ASCII or tokenized)
+            if (!atEnd(b, pos) && (b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) {
+                ++pos; // consume comma
+                skipSpaces(b, pos);
+            } else {
+                throwBasicError(2, "Expected comma after file number in PRINT#", pos);
+            }
+        }
+        
+        // Check for PRINT USING syntax
         if (!atEnd(b, pos)) {
             // Check if the next token is USING
             if (tok) {
                 std::string nextTokenName = tok->getTokenName(b[pos]);
                 if (nextTokenName == "USING") {
-                    return doPRINTUSING(b, pos);
+                    return doPRINTUSING(b, pos, fileNumber, isFileOutput);
                 }
             }
         }
@@ -365,15 +411,23 @@ private:
         }
         if (!trailingSemicolon) output += "\n";
         
-        // Send output via callback only (console/GUI decide where to print)
-        if (printCallback) {
-            printCallback(output);
+        // Send output via callback or file
+        if (isFileOutput) {
+            // Write to file
+            if (!fileManager.writeData(fileNumber, output)) {
+                throwBasicError(61, "Disk full", pos);
+            }
+        } else {
+            // Send to console/GUI via callback
+            if (printCallback) {
+                printCallback(output);
+            }
         }
         
         return 0;
     }
 
-    uint16_t doPRINTUSING(const std::vector<uint8_t>& b, size_t& pos) {
+    uint16_t doPRINTUSING(const std::vector<uint8_t>& b, size_t& pos, uint8_t fileNumber = 0, bool isFileOutput = false) {
         // Consume the USING token
         ++pos;
         
@@ -467,9 +521,17 @@ private:
         
         if (!trailingSemicolon) output += "\n";
         
-        // Send output via callback only
-        if (printCallback) {
-            printCallback(output);
+        // Send output via callback or file
+        if (isFileOutput) {
+            // Write to file
+            if (!fileManager.writeData(fileNumber, output)) {
+                throwBasicError(61, "Disk full", pos);
+            }
+        } else {
+            // Send to console/GUI via callback
+            if (printCallback) {
+                printCallback(output);
+            }
         }
         
         return 0;
@@ -595,6 +657,217 @@ private:
         
         file.close();
         std::cout << "Ok" << std::endl;
+        return 0;
+    }
+
+    // OPEN "filename" FOR mode AS #filenumber
+    uint16_t doOPEN(const std::vector<uint8_t>& b, size_t& pos) {
+        skipSpaces(b, pos);
+        
+        // Parse filename (string expression)
+        auto filenameRes = ev.evaluate(b, pos, env);
+        pos = filenameRes.nextPos;
+        
+        std::string filename;
+        std::visit([&](auto&& x) {
+            using T = std::decay_t<decltype(x)>;
+            if constexpr (std::is_same_v<T, expr::Str>) {
+                filename = x.v;
+            } else {
+                throwBasicError(13, "Type mismatch: filename must be string", pos);
+            }
+        }, filenameRes.value);
+        
+        skipSpaces(b, pos);
+        
+        // Expect FOR keyword
+        bool hasFor = false;
+        if (!atEnd(b, pos)) {
+            uint8_t t = b[pos];
+            if (t == 0x81) { // TOKEN_FOR
+                ++pos; 
+                hasFor = true;
+            } else if (t >= 0x20 && t < 0x80) {
+                // Try ASCII "FOR"
+                auto save = pos;
+                std::string forWord;
+                for (int i = 0; i < 3 && !atEnd(b, pos) && b[pos] >= 0x20 && b[pos] < 0x80; ++i) {
+                    forWord.push_back(static_cast<char>(std::toupper(b[pos++])));
+                }
+                if (forWord == "FOR") hasFor = true; else pos = save;
+            }
+        }
+        
+        if (!hasFor) {
+            throwBasicError(2, "Expected FOR in OPEN statement", pos);
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Parse mode keyword (INPUT, OUTPUT, APPEND, RANDOM)
+        std::string modeStr;
+        if (!atEnd(b, pos)) {
+            uint8_t t = b[pos];
+            if (t == 0x84) { // TOKEN_INPUT
+                modeStr = "INPUT";
+                ++pos;
+            } else if (t >= 0x20 && t < 0x80) {
+                // Parse ASCII mode keyword - read until space or non-alpha
+                std::string word;
+                while (!atEnd(b, pos) && b[pos] >= 0x20 && b[pos] < 0x80 && 
+                       (std::isalpha(b[pos]) || std::isdigit(b[pos]))) {
+                    char c = static_cast<char>(std::toupper(b[pos++]));
+                    word.push_back(c);
+                    // Stop if we've reached potential keywords like AS
+                    if (word.length() >= 2 && word.substr(word.length() - 2) == "AS") {
+                        // Check if this is just "AS" or ends with AS (like "OUTPUTAS")
+                        if (word == "AS") {
+                            pos -= 2; // Back up to parse AS separately
+                            word = "";
+                            break;
+                        } else if (word.length() > 2) {
+                            // This might be something like "OUTPUTAS" - split it
+                            std::string prefix = word.substr(0, word.length() - 2);
+                            if (prefix == "OUTPUT" || prefix == "APPEND" || prefix == "RANDOM") {
+                                pos -= 2; // Back up so AS can be parsed separately
+                                word = prefix;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (word == "OUTPUT" || word == "INPUT" || word == "APPEND" || word == "RANDOM") {
+                    modeStr = word;
+                } else if (!word.empty()) {
+                    throwBasicError(2, "Invalid file mode: " + word, pos);
+                }
+            } else {
+                throwBasicError(2, "Expected file mode (INPUT, OUTPUT, APPEND, RANDOM)", pos);
+            }
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Convert mode string to FileMode
+        gwbasic::FileMode mode;
+        
+        if (modeStr == "INPUT") {
+            mode = gwbasic::FileMode::INPUT;
+        } else if (modeStr == "OUTPUT") {
+            mode = gwbasic::FileMode::OUTPUT;
+        } else if (modeStr == "APPEND") {
+            mode = gwbasic::FileMode::APPEND;
+        } else {
+            throwBasicError(5, "Illegal function call: invalid file mode '" + modeStr + "'", pos);
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Expect AS keyword (tokenized or ASCII)
+        bool hasAs = false;
+        if (!atEnd(b, pos)) {
+            uint8_t t = b[pos];
+            if (t >= 0x80 && tok && tok->getTokenName(t) == "AS") {
+                ++pos;
+                hasAs = true;
+            } else if (t >= 0x20 && t < 0x80) {
+                // Try ASCII "AS"
+                auto save = pos;
+                std::string asWord;
+                for (int i = 0; i < 2 && !atEnd(b, pos) && b[pos] >= 0x20 && b[pos] < 0x80; ++i) {
+                    asWord.push_back(static_cast<char>(std::toupper(b[pos++])));
+                }
+                if (asWord == "AS") hasAs = true; else pos = save;
+            }
+        }
+        
+        if (!hasAs) {
+            throwBasicError(2, "Expected AS in OPEN statement", pos);
+        }
+        
+        skipSpaces(b, pos);
+        
+    // Expect # for file number (either ASCII '#' or tokenized operator)
+    if (atEnd(b, pos) || !(b[pos] == '#' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "#"))) {
+            throwBasicError(2, "Expected # in OPEN statement", pos);
+        }
+        ++pos; // consume #
+        
+        skipSpaces(b, pos);
+        
+        // Parse file number
+        auto fileNumRes = ev.evaluate(b, pos, env);
+        pos = fileNumRes.nextPos;
+        
+        uint8_t fileNumber = static_cast<uint8_t>(expr::ExpressionEvaluator::toInt16(fileNumRes.value));
+        
+        // Validate file number
+        if (!gwbasic::FileManager::isValidFileNumber(fileNumber)) {
+            throwBasicError(52, "Bad file number", pos);
+        }
+        
+        // Try to open the file
+        if (!fileManager.openFile(fileNumber, filename, mode)) {
+            // Determine appropriate error message based on mode and filename
+            if (mode == gwbasic::FileMode::INPUT) {
+                throwBasicError(53, "File not found", pos);
+            } else {
+                throwBasicError(70, "Permission denied", pos);
+            }
+        }
+        
+        return 0;
+    }
+
+    // CLOSE [#filenumber[,#filenumber]...] or CLOSE (close all)
+    uint16_t doCLOSE(const std::vector<uint8_t>& b, size_t& pos) {
+        skipSpaces(b, pos);
+        
+        // If no arguments, close all files
+        if (atEnd(b, pos) || b[pos] == ':' || b[pos] == 0x00) {
+            fileManager.closeAll();
+            return 0;
+        }
+        
+        // Parse file number list
+        while (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+            skipSpaces(b, pos);
+            if (atEnd(b, pos) || b[pos] == ':' || b[pos] == 0x00) break;
+            
+            // Optional # prefix (ASCII or tokenized)
+            if (b[pos] == '#' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "#")) {
+                ++pos; // consume #
+                skipSpaces(b, pos);
+            }
+            
+            // Parse file number
+            auto fileNumRes = ev.evaluate(b, pos, env);
+            pos = fileNumRes.nextPos;
+            
+            uint8_t fileNumber = static_cast<uint8_t>(expr::ExpressionEvaluator::toInt16(fileNumRes.value));
+            
+            // Validate and close file
+            if (!gwbasic::FileManager::isValidFileNumber(fileNumber)) {
+                throwBasicError(52, "Bad file number", pos);
+            }
+            
+            if (!fileManager.closeFile(fileNumber)) {
+                // File was not open - this is not an error in GW-BASIC
+                // Just continue silently
+            }
+            
+            skipSpaces(b, pos);
+            
+            // Check for comma (more file numbers)
+            if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) { // 0xF5 is tokenized comma
+                ++pos; // consume comma
+                continue;
+            }
+            
+            // End of file number list
+            break;
+        }
+        
         return 0;
     }
 
@@ -895,13 +1168,13 @@ private:
         pos = startRes.nextPos;
         
         skipSpaces(b, pos);
-        // Expect TO keyword
+        // Expect TO keyword (tokenized or ASCII)
         bool hasTo = false;
         if (!atEnd(b, pos)) {
             uint8_t t = b[pos];
             if (t >= 0x80) {
-                std::string name = tok ? tok->getTokenName(t) : std::string{};
-                if (name == "TO") { ++pos; hasTo = true; }
+                std::string n = tok ? tok->getTokenName(t) : std::string{};
+                if (n == "TO") { ++pos; hasTo = true; }
             }
         }
         if (!hasTo) {
@@ -1949,9 +2222,53 @@ private:
     uint16_t doINPUT(const std::vector<uint8_t>& b, size_t& pos) {
         // INPUT statement implementation
         // Syntax: INPUT [prompt$;] variable[,variable]...
-        // or: INPUT variable[,variable]...
+        // or: INPUT# filenumber, variable[,variable]...
         
         skipSpaces(b, pos);
+        
+        // Check for INPUT# (file input) syntax first
+        uint8_t fileNumber = 0; // 0 means console input
+        bool isFileInput = false;
+        
+    // Check if starts with # (file number) - ASCII or tokenized
+    if (!atEnd(b, pos) && (b[pos] == '#' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "#"))) {
+            ++pos; // consume #
+            skipSpaces(b, pos);
+            
+            // Parse file number
+            auto fileNumRes = ev.evaluate(b, pos, env);
+            pos = fileNumRes.nextPos;
+            
+            fileNumber = static_cast<uint8_t>(expr::ExpressionEvaluator::toInt16(fileNumRes.value));
+            isFileInput = true;
+            
+            // Validate file number and check if open for input
+            if (!gwbasic::FileManager::isValidFileNumber(fileNumber)) {
+                throwBasicError(52, "Bad file number", pos);
+            }
+            
+            if (!fileManager.isFileOpen(fileNumber)) {
+                throwBasicError(62, "Input past end", pos);
+            }
+            
+            auto* fileHandle = fileManager.getFile(fileNumber);
+            if (!fileHandle || fileHandle->mode != gwbasic::FileMode::INPUT) {
+                throwBasicError(54, "Bad file mode", pos);
+            }
+            
+            skipSpaces(b, pos);
+            
+            // Expect comma after file number (ASCII or tokenized)
+            if (!atEnd(b, pos) && (b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) {
+                ++pos; // consume comma
+                skipSpaces(b, pos);
+            } else {
+                throwBasicError(2, "Expected comma after file number in INPUT#", pos);
+            }
+            
+            // For file input, skip prompt parsing - jump to variable parsing
+            return doFileInput(b, pos, fileNumber);
+        }
         
         std::string prompt;
         bool hasPrompt = false;
@@ -2093,6 +2410,55 @@ private:
         } else {
             // Fallback to stdin (console mode)
             std::getline(std::cin, inputLine);
+        }
+        
+        // Parse the input and assign to variables
+        parseInputAndAssignVariables(inputLine, variables);
+        
+        return 0;
+    }
+
+    // Helper method for INPUT# file input
+    uint16_t doFileInput(const std::vector<uint8_t>& b, size_t& pos, uint8_t fileNumber) {
+        // Get list of variables to read into
+        std::vector<std::string> variables;
+        
+        while (!atEnd(b, pos)) {
+            skipSpaces(b, pos);
+            if (atEnd(b, pos) || b[pos] == ':') break;
+            
+            auto varName = readIdentifier(b, pos);
+            if (varName.empty()) {
+                throw expr::BasicError(2, "Expected variable name in INPUT#", pos);
+            }
+            
+            variables.push_back(varName);
+            
+            skipSpaces(b, pos);
+            
+            // Check for comma (more variables)
+            if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) { // 0xF5 is tokenized comma
+                ++pos; // consume comma
+                continue;
+            }
+            
+            // End of variable list
+            break;
+        }
+        
+        if (variables.empty()) {
+            throw expr::BasicError(2, "No variables specified in INPUT#", pos);
+        }
+        
+        // Read from file and assign to variables
+        std::string inputLine;
+        if (!fileManager.readLine(fileNumber, inputLine)) {
+            // Check if EOF
+            if (fileManager.isEOF(fileNumber)) {
+                throwBasicError(62, "Input past end", pos);
+            } else {
+                throwBasicError(57, "Device I/O error", pos);
+            }
         }
         
         // Parse the input and assign to variables

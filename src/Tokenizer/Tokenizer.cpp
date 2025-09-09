@@ -103,6 +103,7 @@ void Tokenizer::initializeTables() {
     addKeyword("CSRLIN", keywordStart++);
     addKeyword("POINT", keywordStart++);
     addKeyword("OFF", keywordStart++);
+    addKeyword("AS", keywordStart++); // Needed for OPEN ... AS #n and FILES/FIELD syntax spacing
     addKeyword("INKEY$", keywordStart++);
     
     // Add operators (with gaps for token alignment)
@@ -133,6 +134,7 @@ void Tokenizer::initializeTables() {
     addOperator(',', operatorStart++);  // Comma
     addOperator(';', operatorStart++);  // Semicolon
     addOperator(':', operatorStart++);  // Colon (statement separator)
+    addOperator('#', operatorStart++);  // Hash (used for file numbers: PRINT #, INPUT #, OPEN AS #)
     
     // Add special multi-character operators to token names for detokenization
     tokenNames[0xF1] = ">=";  // GEQUTK
@@ -432,13 +434,19 @@ std::string Tokenizer::detokenize(const std::vector<uint8_t>& tokens) {
             auto it = tokenNames.find(token);
             if (it != tokenNames.end()) {
                 // Add space before token if needed
+                // Do not add space before comma (so we get "#1," not "#1 ,")
                 if (!result.str().empty() && result.str().back() != ' ' && 
-                    result.str().back() != '\n') {
+                    result.str().back() != '\n' && it->second != ",") {
                     result << " ";
                 }
-                result << it->second;
+                const std::string& name = it->second;
+                result << name;
                 if (token != TOKEN_REM) {
-                    result << " ";
+                    // Do not add trailing space after certain punctuation tokens
+                    // Especially after '#', we want "#1" not "# 1"
+                    if (name != "#" && name != "(" ) {
+                        result << " ";
+                    }
                 }
             } else {
                 result << "[UNKNOWN:" << std::hex << (int)token << std::dec << "]";
@@ -490,14 +498,17 @@ std::string Tokenizer::detokenize(const std::vector<uint8_t>& tokens) {
             if (it != tokenNames.end()) {
                 // This is an operator or other named token
                 // Add space before operator if needed
+                // Do not add space before comma (so we get "#1," not "#1 ,")
                 if (!result.str().empty() && result.str().back() != ' ' && 
-                    result.str().back() != '\n' && result.str().back() != '(') {
+                    result.str().back() != '\n' && result.str().back() != '(' &&
+                    it->second != ",") {
                     result << " ";
                 }
                 result << it->second;
                 // Add space after operator if needed (look ahead to see if next token exists)
+                // Do not add trailing space after '#' (so we get "#1" not "# 1")
                 if (i + 1 < tokens.size() && tokens[i + 1] != 0x00 && 
-                    it->second != "(" && it->second != ")") {
+                    it->second != "(" && it->second != ")" && it->second != "#") {
                     result << " ";
                 }
                 i++;

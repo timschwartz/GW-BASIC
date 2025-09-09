@@ -10,6 +10,8 @@ libruntime_la_SOURCES = \
     DataManager.hpp \
     EventTraps.cpp \
     EventTraps.hpp \
+    FileManager.cpp \
+    FileManager.hpp \
     RuntimeStack.hpp \
     StringHeap.hpp \
     StringManager.hpp \
