@@ -860,8 +860,7 @@ private:
         // Render text or graphics
         if (graphicsMode) {
             renderGraphics();
-            // TODO: Add text overlay support for graphics modes
-            // For now, just render graphics to avoid crashes
+            renderTextOverlay();  // Re-enable text overlay for graphics modes
         } else {
             renderTextMode();
         }
@@ -914,26 +913,113 @@ private:
     
     void renderTextOverlay() {
         // Render text overlay for graphics modes
+        // Calculate scaling factors for text in graphics modes
+        float textScale = 1.0f;
+        
+        // In low-resolution graphics modes, we might want to scale text appropriately
+        if (screenWidth < 640) {
+            textScale = static_cast<float>(screenWidth) / 640.0f;
+        }
+        
+        int scaledCharW = static_cast<int>(CHAR_W * textScale);
+        int scaledCharH = static_cast<int>(CHAR_H * textScale);
+        
         // Only render non-space characters to allow graphics to show through
         for (int y = 0; y < rows; y++) {
             for (int x = 0; x < cols; x++) {
                 const auto& screenChar = screen[y][x];
-                if (screenChar.ch != ' ' && y < MAX_ROWS && x < MAX_COLS) {  // Bounds check and only render visible characters
-                    renderChar(x, y, screenChar);
+                if (screenChar.ch != ' ' && y < MAX_ROWS && x < MAX_COLS) {
+                    // Check if character would fit in the graphics window
+                    int charPixelX = x * scaledCharW;
+                    int charPixelY = y * scaledCharH;
+                    
+                    if (charPixelX + scaledCharW <= screenWidth && charPixelY + scaledCharH <= screenHeight) {
+                        renderCharScaled(x, y, screenChar, textScale);
+                    }
                 }
             }
         }
         
         // Render cursor in graphics mode
         if (cursorVisible && cursorX >= 0 && cursorY >= 0 && cursorX < cols && cursorY < rows) {
-            SDL_SetRenderDrawColor(renderer, WHITE.r, WHITE.g, WHITE.b, WHITE.a);
-            SDL_FRect cursorRect = {
-                static_cast<float>(cursorX * CHAR_W),
-                static_cast<float>(cursorY * CHAR_H + CHAR_H - 2),
-                static_cast<float>(CHAR_W),
-                2.0f
+            int cursorPixelX = cursorX * scaledCharW;
+            int cursorPixelY = cursorY * scaledCharH;
+            
+            if (cursorPixelX + scaledCharW <= screenWidth && cursorPixelY + scaledCharH <= screenHeight) {
+                SDL_SetRenderDrawColor(renderer, WHITE.r, WHITE.g, WHITE.b, WHITE.a);
+                SDL_FRect cursorRect = {
+                    static_cast<float>(cursorPixelX),
+                    static_cast<float>(cursorPixelY + scaledCharH - 2),
+                    static_cast<float>(scaledCharW),
+                    2.0f
+                };
+                SDL_RenderFillRect(renderer, &cursorRect);
+            }
+        }
+    }
+    
+    void renderCharScaled(int x, int y, const ScreenChar& screenChar, float scale) {
+        int scaledCharW = static_cast<int>(CHAR_W * scale);
+        int scaledCharH = static_cast<int>(CHAR_H * scale);
+        
+        // Calculate pixel position
+        int charPixelX = x * scaledCharW;
+        int charPixelY = y * scaledCharH;
+        
+        // Bounds check
+        if (charPixelX + scaledCharW > screenWidth || charPixelY + scaledCharH > screenHeight) {
+            return;
+        }
+        
+        if (screenChar.ch == ' ') {
+            // Still render background for spaces
+            if (screenChar.bg.r != 0 || screenChar.bg.g != 0 || screenChar.bg.b != 0) {
+                SDL_SetRenderDrawColor(renderer, screenChar.bg.r, screenChar.bg.g, screenChar.bg.b, screenChar.bg.a);
+                SDL_FRect bgRect = {
+                    static_cast<float>(charPixelX),
+                    static_cast<float>(charPixelY),
+                    static_cast<float>(scaledCharW),
+                    static_cast<float>(scaledCharH)
+                };
+                SDL_RenderFillRect(renderer, &bgRect);
+            }
+            return;
+        }
+        
+        // Background
+        if (screenChar.bg.r != 0 || screenChar.bg.g != 0 || screenChar.bg.b != 0) {
+            SDL_SetRenderDrawColor(renderer, screenChar.bg.r, screenChar.bg.g, screenChar.bg.b, screenChar.bg.a);
+            SDL_FRect bgRect = {
+                static_cast<float>(charPixelX),
+                static_cast<float>(charPixelY),
+                static_cast<float>(scaledCharW),
+                static_cast<float>(scaledCharH)
             };
-            SDL_RenderFillRect(renderer, &cursorRect);
+            SDL_RenderFillRect(renderer, &bgRect);
+        }
+        
+        // Render character using bitmap font with scaling
+        const uint8_t* charData = BitmapFont::getCharData(screenChar.ch);
+        SDL_SetRenderDrawColor(renderer, screenChar.fg.r, screenChar.fg.g, screenChar.fg.b, screenChar.fg.a);
+        
+        // Scale font data
+        float pixelScaleX = static_cast<float>(scaledCharW) / CHAR_W;
+        float pixelScaleY = static_cast<float>(scaledCharH) / CHAR_H;
+        
+        for (int row = 0; row < CHAR_H; row++) {
+            uint8_t rowData = charData[row];
+            for (int col = 0; col < CHAR_W; col++) {
+                if (rowData & (0x80 >> col)) {
+                    // Draw scaled pixel(s)
+                    SDL_FRect pixelRect = {
+                        static_cast<float>(charPixelX + col * pixelScaleX),
+                        static_cast<float>(charPixelY + row * pixelScaleY),
+                        pixelScaleX,
+                        pixelScaleY
+                    };
+                    SDL_RenderFillRect(renderer, &pixelRect);
+                }
+            }
         }
     }
     

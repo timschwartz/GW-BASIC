@@ -7,7 +7,7 @@ A comprehensive status overview of the GW-BASIC reimplementation in C++.
 
 ## Summary
 
-This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 87% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, comprehensive event trap handling, full function key support, and complete INPUT/PRINT behavior aligned with GW-BASIC semantics. Recent work added comprehensive function key support (F1-F10) with soft key expansion and event trap integration, unified console and GUI execution through the InterpreterLoop, added extended-statement handling (including SYSTEM), and fixed PRINT/PRINT USING parsing at line terminators.
+This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 89% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, comprehensive event trap handling, full function key support, complete SCREEN statement with graphics mode support and text framebuffer, and complete INPUT/PRINT behavior aligned with GW-BASIC semantics. Recent work added comprehensive function key support (F1-F10) with soft key expansion and event trap integration, unified console and GUI execution through the InterpreterLoop, added extended-statement handling (including SYSTEM), fixed PRINT/PRINT USING parsing at line terminators, and implemented full SCREEN statement functionality with 14 video modes, dynamic window resizing, and scaled text overlay for graphics modes.
 
 ## ✅ Completed Components
 
@@ -196,6 +196,7 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **END/STOP**: Program termination
 - ✅ **SYSTEM**: Implemented as a program statement via extended token 0xFE 0x02, halting execution
 - ✅ **LOAD/SAVE**: Basic file I/O for program storage
+- ✅ **SCREEN Statement**: Complete implementation with 14 video modes (0-13), dynamic window resizing, graphics mode switching, and text framebuffer overlay for graphics modes
 - ⚠️ **Missing**: Most other I/O statements (OPEN, CLOSE, INPUT#, PRINT#)
 
 **Files**: `src/InterpreterLoop/BasicDispatcher.hpp`
@@ -205,9 +206,11 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - Corrected newline and separator semantics: trailing semicolon suppresses newline; commas advance to tab stops
 - Removed duplicate direct stdout output; output and prompts now go through printCallback only
 
-### User Interface (85% Complete)
+### User Interface (90% Complete)
 - ✅ **SDL3 Integration**: Modern graphics framework for cross-platform support
 - ✅ **Text Mode Emulation**: 80x25 character display with CGA-style colors
+- ✅ **Graphics Mode Support**: Complete SCREEN statement implementation with 14 video modes, dynamic window resizing (320x200 to 720x400), pixel buffer management, and scaled text overlay
+- ✅ **Text Framebuffer**: Automatic character scaling system for text display in graphics modes with proper bounds checking and background support
 - ✅ **Keyboard Input**: Full keyboard handling with command history and event trap integration
 - ✅ **Function Key Support**: Complete F1-F10 function key implementation with soft key expansion and event trap integration
 - ✅ **Soft Key System**: Default soft key assignments (F1="LIST", F2="RUN\r", F3="LOAD\"", etc.) with expandable execution
@@ -223,6 +226,13 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ⚠️ **Missing**: Screen positioning, cursor control
 
 **Files**: `src/main.cpp`, `src/BitmapFont.hpp`
+
+**Recent Enhancements:**
+- Complete SCREEN statement implementation with 14 video modes (0-13) supporting dynamic window resizing from 320x200 to 720x400
+- Advanced text framebuffer system with automatic character scaling for graphics modes (0.5x scale for low-res, 1.0x for high-res)
+- SDL3-based pixel buffer management with separate rendering paths for text mode and graphics mode with text overlay
+- Scaled character rendering using bitmap font data with proper bounds checking and background support
+- Graphics infrastructure with setScreenMode(), renderGraphics(), renderTextOverlay(), and renderCharScaled() functions
 
 ## ⚠️ Partially Implemented
 
@@ -254,9 +264,12 @@ Recent fixes:
 - Trailing semicolon suppresses newline; commas align to tab stops
 - INPUT prompts are emitted via callback only to avoid duplicate output
 
-### Graphics and Sound (0% Complete)
-- ❌ **Graphics Statements**: SCREEN, PSET, LINE, CIRCLE, etc.
-- ❌ **Color Support**: COLOR statement and palette management
+### Graphics and Sound (25% Complete)
+- ✅ **SCREEN Statement**: Complete implementation with 14 video modes (0-13), dynamic window resizing, and proper graphics mode switching
+- ✅ **Text Framebuffer**: Scaled text overlay system for graphics modes with automatic character scaling based on resolution
+- ✅ **Graphics Infrastructure**: SDL3-based pixel buffer management with separate rendering paths for text and graphics modes
+- ❌ **Graphics Drawing**: PSET, LINE, CIRCLE, GET, PUT statements
+- ❌ **Color Support**: COLOR statement and palette management  
 - ❌ **Sound**: SOUND, PLAY, BEEP statements
 
 ## ❌ Not Implemented
@@ -326,8 +339,8 @@ Recent fixes:
 | Runtime System | 98% | ~1200 | Near Complete |
 | Interpreter Loop | 90% | ~350 | Core Complete |
 | Basic Dispatcher | 98% | ~1400 | Well Featured |
-| User Interface | 85% | ~700 | Well Featured |
-| **Overall** | **87%** | **~7250** | **Beta Stage** |
+| User Interface | 90% | ~700 | Well Featured |
+| **Overall** | **89%** | **~7250** | **Beta Stage** |
 
 ## 🎯 Next Priority Items
 
@@ -344,10 +357,11 @@ Recent fixes:
 5. **PRINT USING String Patterns**: Extend PRINT USING to support string formatting patterns
 
 ### Low Priority (Advanced Features)
-1. **Graphics**: Basic graphics statements (SCREEN, PSET, LINE)
+1. **Graphics Drawing**: Basic graphics drawing statements (PSET, LINE, CIRCLE)
 2. **Sound**: SOUND and BEEP statements
 3. **Random File I/O**: GET, PUT operations
 4. **Protected Files**: Encrypted program format
+5. **Color Support**: COLOR statement and palette management
 
 ## 🚧 Known Issues
 
@@ -370,6 +384,7 @@ The reimplemented GW-BASIC can currently run simple programs such as:
 
 ```basic
 10 DIM A(10), MATRIX(5,5)
+15 SCREEN 1: REM Graphics mode with text overlay
 20 PRINT "Hello, World!"
 25 INPUT "Enter your name: ", NAME$
 30 FOR I = 1 TO 10
@@ -383,7 +398,8 @@ The reimplemented GW-BASIC can currently run simple programs such as:
 87 PRINT USING "With commas: ###,###.##"; 12345.67
 88 INPUT "Enter a number: ", VALUE
 89 PRINT "You entered: "; VALUE
-90 END
+90 SCREEN 0: REM Back to text mode
+95 END
 ```
 
 It supports:
@@ -399,6 +415,8 @@ It supports:
 - Interactive command shell; SYSTEM halts program as an extended statement
 - Function key support (F1-F10) with soft key expansion and event trap integration
 - Microsoft Binary Format (MBF) compatibility for numeric accuracy
+- Complete SCREEN statement with 14 video modes (0-13) and dynamic window resizing
+- Text display in all graphics modes with automatic character scaling and proper text overlay
 
 ## 🔮 Future Roadmap
 
