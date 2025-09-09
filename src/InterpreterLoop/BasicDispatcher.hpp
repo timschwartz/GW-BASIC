@@ -37,9 +37,10 @@ class BasicDispatcher {
 public:
     using PrintCallback = std::function<void(const std::string&)>;
     using InputCallback = std::function<std::string(const std::string&)>; // prompt -> input
+    using ScreenModeCallback = std::function<bool(int)>; // mode -> success
     
-    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr)
-        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), printCallback(printCb), inputCallback(inputCb) {
+    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr, ScreenModeCallback screenCb = nullptr)
+        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb) {
         // Wire up cross-references
         vars.setStringHeap(&strHeap);
         vars.setArrayManager(&arrayManager);
@@ -143,6 +144,7 @@ private:
     expr::Env env;
     PrintCallback printCallback;
     InputCallback inputCallback;
+    ScreenModeCallback screenModeCallback;
     uint16_t currentLine = 0; // Current line number being executed
     bool testMode = false; // Set to true to avoid waiting for input in tests
 
@@ -306,6 +308,7 @@ private:
         if (name == "RESUME") return doRESUME(b, pos);
         if (name == "KEY") return doKEY(b, pos);
         if (name == "TIMER") return doTIMER(b, pos);
+        if (name == "SCREEN") return doSCREEN(b, pos);
         return 0;
     }
 
@@ -1721,6 +1724,153 @@ private:
             } else if (command == "STOP") {
                 eventTraps.suspendTrap(gwbasic::EventType::Timer);
             }
+        }
+        
+        return 0;
+    }
+
+    uint16_t doSCREEN(const std::vector<uint8_t>& b, size_t& pos) {
+        // SCREEN statement implementation
+        // Syntax: SCREEN mode[,colorswitch][,apage][,vpage]
+        
+        skipSpaces(b, pos);
+        
+        // Parse parameters - SCREEN uses integer parameters
+        std::vector<int16_t> params;
+        
+        // Parse mode parameter (required)
+        if (atEnd(b, pos) || b[pos] == ':' || b[pos] == 0x00) {
+            throwBasicError(5, "Missing mode parameter in SCREEN", pos);
+        }
+        
+        auto res = ev.evaluate(b, pos, env);
+        pos = res.nextPos;
+        int16_t mode = expr::ExpressionEvaluator::toInt16(res.value);
+        params.push_back(mode);
+        
+        skipSpaces(b, pos);
+        
+        // Parse optional parameters (colorswitch, apage, vpage)
+        while (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+            // Check for comma
+            if (b[pos] == ',' || b[pos] == 0xF5) { // 0xF5 is tokenized comma
+                ++pos; // consume comma
+                skipSpaces(b, pos);
+                
+                // Check for null parameter (two commas in a row)
+                if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5 || b[pos] == ':' || b[pos] == 0x00)) {
+                    params.push_back(0); // null parameter defaults to 0
+                    continue;
+                }
+                
+                // Parse parameter
+                auto res = ev.evaluate(b, pos, env);
+                pos = res.nextPos;
+                params.push_back(expr::ExpressionEvaluator::toInt16(res.value));
+                
+                skipSpaces(b, pos);
+            } else {
+                break; // End of parameter list
+            }
+        }
+        
+        // Execute SCREEN command based on mode
+        return executeScreenMode(mode, params);
+    }
+    
+    uint16_t executeScreenMode(int16_t mode, const std::vector<int16_t>& params) {
+        // Validate mode range
+        if (mode < 0 || mode > 13 || (mode >= 3 && mode <= 6)) {
+            throwBasicError(5, "Illegal function call: Invalid screen mode " + std::to_string(mode), 0);
+            return 0;
+        }
+        
+        // Try to change screen mode via callback
+        bool success = false;
+        if (screenModeCallback) {
+            success = screenModeCallback(mode);
+        }
+        
+        if (!success && screenModeCallback) {
+            throwBasicError(5, "Illegal function call: Could not set screen mode " + std::to_string(mode), 0);
+            return 0;
+        }
+        
+        // Report mode change success
+        switch (mode) {
+            case 0:
+                // Text mode (80x25 or 40x25)
+                if (printCallback) {
+                    printCallback("SCREEN 0: Text mode 80x25 - Active\n");
+                }
+                break;
+                
+            case 1:
+                // CGA Graphics mode 320x200, 4 colors
+                if (printCallback) {
+                    printCallback("SCREEN 1: Graphics mode 320x200, 4 colors - Active\n");
+                }
+                break;
+                
+            case 2:
+                // CGA Graphics mode 640x200, 2 colors
+                if (printCallback) {
+                    printCallback("SCREEN 2: Graphics mode 640x200, 2 colors - Active\n");
+                }
+                break;
+                
+            case 7:
+                // EGA Graphics mode 320x200, 16 colors
+                if (printCallback) {
+                    printCallback("SCREEN 7: EGA mode 320x200, 16 colors - Active\n");
+                }
+                break;
+                
+            case 8:
+                // EGA Graphics mode 640x200, 16 colors
+                if (printCallback) {
+                    printCallback("SCREEN 8: EGA mode 640x200, 16 colors - Active\n");
+                }
+                break;
+                
+            case 9:
+                // EGA Graphics mode 640x350, 16 colors
+                if (printCallback) {
+                    printCallback("SCREEN 9: EGA mode 640x350, 16 colors - Active\n");
+                }
+                break;
+                
+            case 10:
+                // EGA Graphics mode 640x350, 4 colors
+                if (printCallback) {
+                    printCallback("SCREEN 10: EGA mode 640x350, 4 colors - Active\n");
+                }
+                break;
+                
+            case 11:
+                // VGA Graphics mode 640x480, 2 colors
+                if (printCallback) {
+                    printCallback("SCREEN 11: VGA mode 640x480, 2 colors - Active\n");
+                }
+                break;
+                
+            case 12:
+                // VGA Graphics mode 640x480, 16 colors
+                if (printCallback) {
+                    printCallback("SCREEN 12: VGA mode 640x480, 16 colors - Active\n");
+                }
+                break;
+                
+            case 13:
+                // VGA Graphics mode 320x200, 256 colors
+                if (printCallback) {
+                    printCallback("SCREEN 13: VGA mode 320x200, 256 colors - Active\n");
+                }
+                break;
+                
+            default:
+                throwBasicError(5, "Illegal function call: Invalid screen mode " + std::to_string(mode), 0);
+                break;
         }
         
         return 0;

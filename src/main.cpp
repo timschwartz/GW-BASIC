@@ -26,13 +26,17 @@ private:
     SDL_Renderer* renderer;
     SDL_Texture* fontTexture;
     
-    // Screen dimensions (emulating 80x25 text mode)
-    static constexpr int SCREEN_WIDTH = 720;
-    static constexpr int SCREEN_HEIGHT = 400;
+    // Screen dimensions (emulating 80x25 text mode by default)
+    int screenWidth = 720;
+    int screenHeight = 400;
     static constexpr int CHAR_W = BitmapFont::FONT_WIDTH;
     static constexpr int CHAR_H = BitmapFont::FONT_HEIGHT;
-    static constexpr int COLS = 80;
-    static constexpr int ROWS = 25;
+    int cols = 80;
+    int rows = 25;
+    
+    // Current screen mode
+    int currentScreenMode = 0;
+    bool graphicsMode = false;
     
     // Colors (CGA-style)
     struct Color {
@@ -50,7 +54,15 @@ private:
         Color fg;
         Color bg;
     };
-    ScreenChar screen[ROWS][COLS];
+    static constexpr int MAX_ROWS = 50;
+    static constexpr int MAX_COLS = 132;
+    ScreenChar screen[MAX_ROWS][MAX_COLS];
+    
+    // Graphics pixel buffer for graphics modes
+    struct PixelData {
+        uint8_t r, g, b, a;
+    };
+    std::vector<PixelData> pixelBuffer;
     
     // Cursor position
     int cursorX, cursorY;
@@ -103,10 +115,11 @@ public:
             std::cerr << "TRACE " << ln << ": ";
             for (auto x : b) fprintf(stderr, "%02X ", x);
             std::cerr << "\n";
-        });        // Create dispatcher with print and input callbacks
+        });        // Create dispatcher with print, input, and screen mode callbacks
         dispatcher = std::make_unique<BasicDispatcher>(tokenizer, programStore,
             [this](const std::string& text) { print(text); },
-            [this](const std::string& prompt) -> std::string { return getInput(prompt); });
+            [this](const std::string& prompt) -> std::string { return getInput(prompt); },
+            [this](int mode) -> bool { return changeScreenMode(mode); });
         
         // Connect event trap system between interpreter and dispatcher
         interpreter->setEventTrapSystem(dispatcher->getEventTrapSystem());
@@ -209,7 +222,7 @@ public:
         }
         
         window = SDL_CreateWindow("GW-BASIC",
-                                  SCREEN_WIDTH, SCREEN_HEIGHT,
+                                  screenWidth, screenHeight,
                                   SDL_WINDOW_RESIZABLE);
         if (!window) {
             std::cerr << "Window creation failed: " << SDL_GetError() << std::endl;
@@ -232,6 +245,11 @@ public:
         showPrompt();
         
         return true;
+    }
+    
+    // Public method to change screen mode (called by SCREEN statement)
+    bool changeScreenMode(int mode) {
+        return setScreenMode(mode);
     }
     
     void run() {
@@ -328,13 +346,18 @@ private:
     }
     
     void clearScreen() {
-        for (int y = 0; y < ROWS; y++) {
-            for (int x = 0; x < COLS; x++) {
+        for (int y = 0; y < rows && y < MAX_ROWS; y++) {
+            for (int x = 0; x < cols && x < MAX_COLS; x++) {
                 screen[y][x] = {' ', WHITE, BLACK};
             }
         }
         cursorX = 0;
         cursorY = 0;
+        
+        // Clear pixel buffer for graphics modes
+        if (graphicsMode && !pixelBuffer.empty()) {
+            std::fill(pixelBuffer.begin(), pixelBuffer.end(), PixelData{0, 0, 0, 255});
+        }
     }
     
     void printStartupMessage() {
@@ -364,9 +387,9 @@ private:
         if (ch == '\n') {
             cursorX = 0;
             cursorY++;
-            if (cursorY >= ROWS) {
+            if (cursorY >= rows) {
                 scrollUp();
-                cursorY = ROWS - 1;
+                cursorY = rows - 1;
             }
         } else if (ch == '\r') {
             cursorX = 0;
@@ -378,26 +401,26 @@ private:
         } else if (ch >= 32 && ch <= 126) {
             screen[cursorY][cursorX] = {ch, WHITE, BLACK};
             cursorX++;
-            if (cursorX >= COLS) {
+            if (cursorX >= cols) {
                 cursorX = 0;
                 cursorY++;
-                if (cursorY >= ROWS) {
+                if (cursorY >= rows) {
                     scrollUp();
-                    cursorY = ROWS - 1;
+                    cursorY = rows - 1;
                 }
             }
         }
     }
     
     void scrollUp() {
-        for (int y = 0; y < ROWS - 1; y++) {
-            for (int x = 0; x < COLS; x++) {
+        for (int y = 0; y < rows - 1; y++) {
+            for (int x = 0; x < cols; x++) {
                 screen[y][x] = screen[y + 1][x];
             }
         }
         // Clear bottom line
-        for (int x = 0; x < COLS; x++) {
-            screen[ROWS - 1][x] = {' ', WHITE, BLACK};
+        for (int x = 0; x < cols; x++) {
+            screen[rows - 1][x] = {' ', WHITE, BLACK};
         }
     }
     
@@ -834,9 +857,21 @@ private:
         SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, BLACK.a);
         SDL_RenderClear(renderer);
         
-        // Render text
-        for (int y = 0; y < ROWS; y++) {
-            for (int x = 0; x < COLS; x++) {
+        // Render text or graphics
+        if (graphicsMode) {
+            renderGraphics();
+            // TODO: Add text overlay support for graphics modes
+            // For now, just render graphics to avoid crashes
+        } else {
+            renderTextMode();
+        }
+        
+        SDL_RenderPresent(renderer);
+    }
+    
+    void renderTextMode() {
+        for (int y = 0; y < rows; y++) {
+            for (int x = 0; x < cols; x++) {
                 renderChar(x, y, screen[y][x]);
             }
         }
@@ -852,18 +887,193 @@ private:
             };
             SDL_RenderFillRect(renderer, &cursorRect);
         }
+    }
+    
+    void renderGraphics() {
+        // Render pixel buffer directly
+        if (!pixelBuffer.empty() && pixelBuffer.size() >= static_cast<size_t>(screenWidth * screenHeight)) {
+            for (int y = 0; y < screenHeight; y++) {
+                for (int x = 0; x < screenWidth; x++) {
+                    size_t index = y * screenWidth + x;
+                    if (index < pixelBuffer.size()) {
+                        const auto& pixel = pixelBuffer[index];
+                        if (pixel.r || pixel.g || pixel.b) {  // Only draw non-black pixels for performance
+                            SDL_SetRenderDrawColor(renderer, pixel.r, pixel.g, pixel.b, pixel.a);
+                            SDL_FRect pixelRect = {
+                                static_cast<float>(x),
+                                static_cast<float>(y),
+                                1.0f, 1.0f
+                            };
+                            SDL_RenderFillRect(renderer, &pixelRect);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    void renderTextOverlay() {
+        // Render text overlay for graphics modes
+        // Only render non-space characters to allow graphics to show through
+        for (int y = 0; y < rows; y++) {
+            for (int x = 0; x < cols; x++) {
+                const auto& screenChar = screen[y][x];
+                if (screenChar.ch != ' ' && y < MAX_ROWS && x < MAX_COLS) {  // Bounds check and only render visible characters
+                    renderChar(x, y, screenChar);
+                }
+            }
+        }
         
-        SDL_RenderPresent(renderer);
+        // Render cursor in graphics mode
+        if (cursorVisible && cursorX >= 0 && cursorY >= 0 && cursorX < cols && cursorY < rows) {
+            SDL_SetRenderDrawColor(renderer, WHITE.r, WHITE.g, WHITE.b, WHITE.a);
+            SDL_FRect cursorRect = {
+                static_cast<float>(cursorX * CHAR_W),
+                static_cast<float>(cursorY * CHAR_H + CHAR_H - 2),
+                static_cast<float>(CHAR_W),
+                2.0f
+            };
+            SDL_RenderFillRect(renderer, &cursorRect);
+        }
+    }
+    
+    // Change screen mode (to be called by SCREEN statement)
+    bool setScreenMode(int mode) {
+        bool oldGraphicsMode = graphicsMode;
+        int oldWidth = screenWidth;
+        int oldHeight = screenHeight;
+        int oldCols = cols;
+        int oldRows = rows;
+        
+        switch (mode) {
+            case 0:  // Text mode 80x25
+                screenWidth = 720;
+                screenHeight = 400;
+                cols = 80;
+                rows = 25;
+                graphicsMode = false;
+                break;
+                
+            case 1:  // CGA 320x200, 4 colors
+                screenWidth = 320;
+                screenHeight = 200;
+                cols = 40;  // Text overlay capability
+                rows = 25;
+                graphicsMode = true;
+                break;
+                
+            case 2:  // CGA 640x200, 2 colors
+                screenWidth = 640;
+                screenHeight = 200;
+                cols = 80;
+                rows = 25;
+                graphicsMode = true;
+                break;
+                
+            case 7:  // EGA 320x200, 16 colors
+                screenWidth = 320;
+                screenHeight = 200;
+                cols = 40;
+                rows = 25;
+                graphicsMode = true;
+                break;
+                
+            case 8:  // EGA 640x200, 16 colors
+                screenWidth = 640;
+                screenHeight = 200;
+                cols = 80;
+                rows = 25;
+                graphicsMode = true;
+                break;
+                
+            case 9:  // EGA 640x350, 16 colors
+                screenWidth = 640;
+                screenHeight = 350;
+                cols = 80;
+                rows = 43;
+                graphicsMode = true;
+                break;
+                
+            case 10:  // EGA 640x350, 4 colors
+                screenWidth = 640;
+                screenHeight = 350;
+                cols = 80;
+                rows = 43;
+                graphicsMode = true;
+                break;
+                
+            case 11:  // VGA 640x480, 2 colors
+                screenWidth = 640;
+                screenHeight = 480;
+                cols = 80;
+                rows = 60;
+                graphicsMode = true;
+                break;
+                
+            case 12:  // VGA 640x480, 16 colors
+                screenWidth = 640;
+                screenHeight = 480;
+                cols = 80;
+                rows = 60;
+                graphicsMode = true;
+                break;
+                
+            case 13:  // VGA 320x200, 256 colors
+                screenWidth = 320;
+                screenHeight = 200;
+                cols = 40;
+                rows = 25;
+                graphicsMode = true;
+                break;
+                
+            default:
+                return false;  // Invalid mode
+        }
+        
+        currentScreenMode = mode;
+        
+        // Resize window if mode changed
+        if (screenWidth != oldWidth || screenHeight != oldHeight) {
+            if (window) {
+                SDL_SetWindowSize(window, screenWidth, screenHeight);
+            }
+        }
+        
+        // Initialize pixel buffer for graphics modes
+        if (graphicsMode) {
+            try {
+                size_t bufferSize = screenWidth * screenHeight;
+                pixelBuffer.assign(bufferSize, {0, 0, 0, 255});
+            } catch (const std::exception& e) {
+                std::cerr << "Error allocating pixel buffer: " << e.what() << std::endl;
+                return false;
+            }
+        } else {
+            pixelBuffer.clear();
+        }
+        
+        // Clear screen in new mode
+        clearScreen();
+        
+        return true;
     }
     
     void renderChar(int x, int y, const ScreenChar& screenChar) {
+        // Bounds check - don't render characters outside window
+        int charPixelX = x * CHAR_W;
+        int charPixelY = y * CHAR_H;
+        
+        if (charPixelX + CHAR_W > screenWidth || charPixelY + CHAR_H > screenHeight) {
+            return;  // Character would be outside window bounds
+        }
+        
         if (screenChar.ch == ' ') {
             // Still render background for spaces
             if (screenChar.bg.r != 0 || screenChar.bg.g != 0 || screenChar.bg.b != 0) {
                 SDL_SetRenderDrawColor(renderer, screenChar.bg.r, screenChar.bg.g, screenChar.bg.b, screenChar.bg.a);
                 SDL_FRect bgRect = {
-                    static_cast<float>(x * CHAR_W),
-                    static_cast<float>(y * CHAR_H),
+                    static_cast<float>(charPixelX),
+                    static_cast<float>(charPixelY),
                     static_cast<float>(CHAR_W),
                     static_cast<float>(CHAR_H)
                 };
@@ -876,8 +1086,8 @@ private:
         if (screenChar.bg.r != 0 || screenChar.bg.g != 0 || screenChar.bg.b != 0) {
             SDL_SetRenderDrawColor(renderer, screenChar.bg.r, screenChar.bg.g, screenChar.bg.b, screenChar.bg.a);
             SDL_FRect bgRect = {
-                static_cast<float>(x * CHAR_W),
-                static_cast<float>(y * CHAR_H),
+                static_cast<float>(charPixelX),
+                static_cast<float>(charPixelY),
                 static_cast<float>(CHAR_W),
                 static_cast<float>(CHAR_H)
             };
@@ -888,8 +1098,8 @@ private:
         const uint8_t* charData = BitmapFont::getCharData(screenChar.ch);
         SDL_SetRenderDrawColor(renderer, screenChar.fg.r, screenChar.fg.g, screenChar.fg.b, screenChar.fg.a);
         
-        int baseX = x * CHAR_W;
-        int baseY = y * CHAR_H;
+        int baseX = charPixelX;
+        int baseY = charPixelY;
         
         for (int row = 0; row < CHAR_H; row++) {
             uint8_t rowData = charData[row];
@@ -976,34 +1186,34 @@ private:
     
     // Display function keys on bottom line (like original GW-BASIC)
     void displayFunctionKeys() {
-        if (!functionKeysEnabled) {
+        if (!functionKeysEnabled || graphicsMode) {
             return;
         }
         
         // Clear the bottom line
-        for (int x = 0; x < COLS; x++) {
-            screen[ROWS - 1][x] = {' ', WHITE, BLACK};
+        for (int x = 0; x < cols; x++) {
+            screen[rows - 1][x] = {' ', WHITE, BLACK};
         }
         
         // Display function keys F1-F10 with their first 6 characters
         int col = 0;
-        for (int i = 0; i < NUM_FUNCTION_KEYS && col < COLS - 8; i++) {
+        for (int i = 0; i < NUM_FUNCTION_KEYS && col < cols - 8; i++) {
             // Display key number (F1-F10, but F10 shows as F0)
             char keyLabel = (i == 9) ? '0' : '1' + i;
-            screen[ROWS - 1][col++] = {'F', BLACK, WHITE};  // Reverse video for key labels
-            screen[ROWS - 1][col++] = {keyLabel, BLACK, WHITE};
+            screen[rows - 1][col++] = {'F', BLACK, WHITE};  // Reverse video for key labels
+            screen[rows - 1][col++] = {keyLabel, BLACK, WHITE};
             
             // Display up to 6 characters of the soft key content
             const std::string& keyText = softKeys[i];
-            for (int j = 0; j < 6 && col < COLS; j++) {
+            for (int j = 0; j < 6 && col < cols; j++) {
                 char ch = (static_cast<size_t>(j) < keyText.length()) ? keyText[j] : ' ';
                 if (ch == '\r') ch = '_';  // Show CR as underscore
-                screen[ROWS - 1][col++] = {ch, WHITE, BLACK};
+                screen[rows - 1][col++] = {ch, WHITE, BLACK};
             }
             
             // Add a space separator if not at end
-            if (i < NUM_FUNCTION_KEYS - 1 && col < COLS) {
-                screen[ROWS - 1][col++] = {' ', WHITE, BLACK};
+            if (i < NUM_FUNCTION_KEYS - 1 && col < cols) {
+                screen[rows - 1][col++] = {' ', WHITE, BLACK};
             }
         }
     }
