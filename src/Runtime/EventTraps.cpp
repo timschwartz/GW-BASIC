@@ -208,6 +208,17 @@ bool EventTrapSystem::hasTriggeredEvents() const {
                       [](const EventTrap& trap) { return trap.triggered && trap.enabled && !trap.suspended; });
 }
 
+bool EventTrapSystem::isKeyTrapEnabled(uint8_t keyIndex) const {
+    auto it = std::find_if(traps.begin(), traps.end(),
+                          [keyIndex](const EventTrap& trap) {
+                              return trap.type == EventType::Key && 
+                                     trap.subEvent == keyIndex && 
+                                     trap.enabled && 
+                                     !trap.suspended;
+                          });
+    return it != traps.end();
+}
+
 EventTrap* EventTrapSystem::findTrap(EventType type, uint8_t subEvent) {
     auto it = std::find_if(traps.begin(), traps.end(),
                           [type, subEvent](const EventTrap& trap) {

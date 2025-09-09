@@ -81,6 +81,7 @@ public:
     void clear();
     bool isAnyTrapEnabled() const;
     bool hasTriggeredEvents() const;
+    bool isKeyTrapEnabled(uint8_t keyIndex) const;  // Check if specific key trap is active
     
     // Callback for interpreter to handle trap jumps
     using TrapCallback = std::function<void(uint16_t lineNumber, EventType type, uint8_t subEvent)>;

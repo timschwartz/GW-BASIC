@@ -2,12 +2,12 @@
 
 A comprehensive status overview of the GW-BASIC reimplementation in C++.
 
-**Last Updated:** September 8, 2025  
+**Last Updated:** September 9, 2025  
 **Current Version:** 0.1
 
 ## Summary
 
-This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 85% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, comprehensive event trap handling, and full INPUT/PRINT behavior aligned with GW-BASIC semantics. Recent work unified console and GUI execution through the InterpreterLoop, added extended-statement handling (including SYSTEM), and fixed PRINT/PRINT USING parsing at line terminators.
+This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 87% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, comprehensive event trap handling, full function key support, and complete INPUT/PRINT behavior aligned with GW-BASIC semantics. Recent work added comprehensive function key support (F1-F10) with soft key expansion and event trap integration, unified console and GUI execution through the InterpreterLoop, added extended-statement handling (including SYSTEM), and fixed PRINT/PRINT USING parsing at line terminators.
 
 ## ✅ Completed Components
 
@@ -205,10 +205,13 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - Corrected newline and separator semantics: trailing semicolon suppresses newline; commas advance to tab stops
 - Removed duplicate direct stdout output; output and prompts now go through printCallback only
 
-### User Interface (70% Complete)
+### User Interface (85% Complete)
 - ✅ **SDL3 Integration**: Modern graphics framework for cross-platform support
 - ✅ **Text Mode Emulation**: 80x25 character display with CGA-style colors
 - ✅ **Keyboard Input**: Full keyboard handling with command history and event trap integration
+- ✅ **Function Key Support**: Complete F1-F10 function key implementation with soft key expansion and event trap integration
+- ✅ **Soft Key System**: Default soft key assignments (F1="LIST", F2="RUN\r", F3="LOAD\"", etc.) with expandable execution
+- ✅ **Event Trap Integration**: Function keys properly check for active KEY traps before expanding soft keys
 - ✅ **Interactive Shell**: Immediate mode and program entry
 - ✅ **Basic Commands**: LIST, RUN, NEW, CLEAR, SYSTEM
 - ✅ **Program Editing**: Line number-based program entry and editing
@@ -216,7 +219,7 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **Command Line Loading**: Automatic file loading from command line arguments with --help support
 - ✅ **File Loading Integration**: Complete loadFile() method with error handling and user feedback
 - ✅ **Console Path Unification**: Console execution uses InterpreterLoop; immediate SYSTEM handled pre-tokenization
-- ⚠️ **Missing**: Function key support, advanced editing features
+- ⚠️ **Missing**: Advanced editing features
 - ⚠️ **Missing**: Screen positioning, cursor control
 
 **Files**: `src/main.cpp`, `src/BitmapFont.hpp`
@@ -273,7 +276,7 @@ Recent fixes:
 
 ### Editor Features
 - ❌ **Full Screen Editor**: Advanced editing capabilities
-- ❌ **Function Keys**: Programmable function key support
+- ✅ **Function Keys**: Complete F1-F10 soft key support with default assignments and event trap integration
 - ❌ **Auto Features**: AUTO line numbering, RENUM
 - ❌ **List Formatting**: Advanced LIST options
 
@@ -323,8 +326,8 @@ Recent fixes:
 | Runtime System | 98% | ~1200 | Near Complete |
 | Interpreter Loop | 90% | ~350 | Core Complete |
 | Basic Dispatcher | 98% | ~1400 | Well Featured |
-| User Interface | 70% | ~700 | Working |
-| **Overall** | **85%** | **~7250** | **Beta Stage** |
+| User Interface | 85% | ~700 | Well Featured |
+| **Overall** | **87%** | **~7250** | **Beta Stage** |
 
 ## 🎯 Next Priority Items
 
@@ -394,6 +397,7 @@ It supports:
 - Array element access with both A(I) and A[I] syntax, including multi-dimensional arrays
 - Program LOAD/SAVE operations
 - Interactive command shell; SYSTEM halts program as an extended statement
+- Function key support (F1-F10) with soft key expansion and event trap integration
 - Microsoft Binary Format (MBF) compatibility for numeric accuracy
 
 ## 🔮 Future Roadmap

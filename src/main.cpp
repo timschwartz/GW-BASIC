@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <array>
 #include <sstream>
 #include <iomanip>
 #include <cctype>
@@ -68,6 +69,12 @@ private:
     std::shared_ptr<InterpreterLoop> interpreter;
     std::unique_ptr<BasicDispatcher> dispatcher;
     
+    // Function key soft key storage (like STRTAB in original GW-BASIC)
+    static constexpr int NUM_FUNCTION_KEYS = 10;  // F1-F10
+    static constexpr int SOFT_KEY_LENGTH = 15;    // Max chars per soft key
+    std::array<std::string, NUM_FUNCTION_KEYS> softKeys;
+    bool functionKeysEnabled = true;  // Whether to display function keys
+    
     // State
     bool running;
     bool programMode;  // true = accepting program lines, false = immediate mode
@@ -83,6 +90,9 @@ public:
         
         // Initialize screen buffer
         clearScreen();
+        
+        // Initialize default function key soft keys (based on original GW-BASIC)
+        initializeSoftKeys();
         
         // Initialize GW-BASIC components
         tokenizer = std::make_shared<Tokenizer>();
@@ -463,6 +473,38 @@ private:
             insertMode = !insertMode;
             break;
             
+        // Function keys F1-F10
+        case SDLK_F1:
+            handleFunctionKey(1);
+            break;
+        case SDLK_F2:
+            handleFunctionKey(2);
+            break;
+        case SDLK_F3:
+            handleFunctionKey(3);
+            break;
+        case SDLK_F4:
+            handleFunctionKey(4);
+            break;
+        case SDLK_F5:
+            handleFunctionKey(5);
+            break;
+        case SDLK_F6:
+            handleFunctionKey(6);
+            break;
+        case SDLK_F7:
+            handleFunctionKey(7);
+            break;
+        case SDLK_F8:
+            handleFunctionKey(8);
+            break;
+        case SDLK_F9:
+            handleFunctionKey(9);
+            break;
+        case SDLK_F10:
+            handleFunctionKey(10);
+            break;
+            
         default:
             // Handle character input
             if (keycode >= 32 && keycode <= 126) {
@@ -785,6 +827,9 @@ private:
     }
     
     void render() {
+        // Update function key display
+        displayFunctionKeys();
+        
         // Clear screen
         SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, BLACK.a);
         SDL_RenderClear(renderer);
@@ -858,6 +903,107 @@ private:
                     };
                     SDL_RenderFillRect(renderer, &pixelRect);
                 }
+            }
+        }
+    }
+    
+    // Initialize default soft keys (based on original GW-BASIC defaults)
+    void initializeSoftKeys() {
+        softKeys[0] = "LIST";        // F1
+        softKeys[1] = "RUN\r";       // F2 - CR auto-executes
+        softKeys[2] = "LOAD\"";      // F3
+        softKeys[3] = "SAVE\"";      // F4
+        softKeys[4] = "CONT\r";      // F5 - CR auto-executes
+        softKeys[5] = "\"LPT1:\"";   // F6
+        softKeys[6] = "TRON\r";      // F7 - CR auto-executes
+        softKeys[7] = "TROFF\r";     // F8 - CR auto-executes
+        softKeys[8] = "KEY";         // F9
+        softKeys[9] = "SCREEN 0,0,0\r"; // F10 - CR auto-executes
+    }
+    
+    // Handle function key press
+    void handleFunctionKey(int keyNumber) {
+        if (keyNumber < 1 || keyNumber > NUM_FUNCTION_KEYS) {
+            return;
+        }
+        
+        // Convert to 0-based index for trap system (KEY(1) = keyIndex 1)
+        uint8_t keyIndex = keyNumber;
+        
+        // Check if there's an active trap for this key
+        if (dispatcher && dispatcher->getEventTrapSystem() && 
+            dispatcher->getEventTrapSystem()->isKeyTrapEnabled(keyIndex)) {
+            // Don't expand soft key if trap is active - the event system will handle it
+            return;
+        }
+        
+        // No active trap, so expand the soft key
+        int softKeyIndex = keyNumber - 1; // Convert to 0-based index for soft key array
+        const std::string& keyText = softKeys[softKeyIndex];
+        if (!keyText.empty()) {
+            // Simulate typing the soft key text
+            for (char ch : keyText) {
+                if (ch == '\r') {
+                    // Handle carriage return as enter
+                    handleEnter();
+                } else {
+                    // Type the character
+                    handleCharInput(ch);
+                }
+            }
+        }
+    }
+    
+    // Set a soft key definition (called by KEY statement)
+    void setSoftKey(int keyNumber, const std::string& text) {
+        if (keyNumber < 1 || keyNumber > NUM_FUNCTION_KEYS) {
+            return;
+        }
+        
+        int keyIndex = keyNumber - 1;
+        softKeys[keyIndex] = text.substr(0, SOFT_KEY_LENGTH);
+    }
+    
+    // Get a soft key definition
+    std::string getSoftKey(int keyNumber) const {
+        if (keyNumber < 1 || keyNumber > NUM_FUNCTION_KEYS) {
+            return "";
+        }
+        
+        int keyIndex = keyNumber - 1;
+        return softKeys[keyIndex];
+    }
+    
+    // Display function keys on bottom line (like original GW-BASIC)
+    void displayFunctionKeys() {
+        if (!functionKeysEnabled) {
+            return;
+        }
+        
+        // Clear the bottom line
+        for (int x = 0; x < COLS; x++) {
+            screen[ROWS - 1][x] = {' ', WHITE, BLACK};
+        }
+        
+        // Display function keys F1-F10 with their first 6 characters
+        int col = 0;
+        for (int i = 0; i < NUM_FUNCTION_KEYS && col < COLS - 8; i++) {
+            // Display key number (F1-F10, but F10 shows as F0)
+            char keyLabel = (i == 9) ? '0' : '1' + i;
+            screen[ROWS - 1][col++] = {'F', BLACK, WHITE};  // Reverse video for key labels
+            screen[ROWS - 1][col++] = {keyLabel, BLACK, WHITE};
+            
+            // Display up to 6 characters of the soft key content
+            const std::string& keyText = softKeys[i];
+            for (int j = 0; j < 6 && col < COLS; j++) {
+                char ch = (static_cast<size_t>(j) < keyText.length()) ? keyText[j] : ' ';
+                if (ch == '\r') ch = '_';  // Show CR as underscore
+                screen[ROWS - 1][col++] = {ch, WHITE, BLACK};
+            }
+            
+            // Add a space separator if not at end
+            if (i < NUM_FUNCTION_KEYS - 1 && col < COLS) {
+                screen[ROWS - 1][col++] = {' ', WHITE, BLACK};
             }
         }
     }

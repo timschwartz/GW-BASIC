@@ -1,6 +1,6 @@
 # Source directory Makefile
 
-SUBDIRS = Tokenizer ProgramStore InterpreterLoop ExpressionEvaluator NumericEngine Runtime
+SUBDIRS = Tokenizer NumericEngine ExpressionEvaluator ProgramStore Runtime InterpreterLoop
 
 # Main GW-BASIC executable
 bin_PROGRAMS = gw-basic
