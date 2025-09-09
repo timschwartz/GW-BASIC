@@ -91,6 +91,11 @@ InterpreterLoop::StepResult InterpreterLoop::step() {
 
     if (nextOverride != 0) {
         // Jump or termination
+        if (nextOverride == 0xFFFF) {
+            // END/STOP sentinel - halt immediately
+            halted = true;
+            return StepResult::Halted;
+        }
         if (!prog->hasLine(nextOverride)) {
             // Invalid jump, halt
             halted = true;

@@ -88,8 +88,12 @@ public:
         tokenizer = std::make_shared<Tokenizer>();
         programStore = std::make_shared<ProgramStore>();
         interpreter = std::make_shared<InterpreterLoop>(programStore, tokenizer);
-        
-        // Create dispatcher with print and input callbacks
+        interpreter->setTrace(true);
+        interpreter->setTraceCallback([](uint16_t ln, const std::vector<uint8_t>& b){
+            std::cerr << "TRACE " << ln << ": ";
+            for (auto x : b) fprintf(stderr, "%02X ", x);
+            std::cerr << "\n";
+        });        // Create dispatcher with print and input callbacks
         dispatcher = std::make_unique<BasicDispatcher>(tokenizer, programStore,
             [this](const std::string& text) { print(text); },
             [this](const std::string& prompt) -> std::string { return getInput(prompt); });
@@ -104,7 +108,7 @@ public:
                 if (result == 0xFFFF) {
                     // END/STOP encountered
                     print("Break\n");
-                    return 0;
+                    return 0xFFFF; // propagate halt sentinel
                 }
                 return result;
             } catch (const std::exception& e) {
@@ -877,7 +881,34 @@ int runConsoleMode(int argc, char* argv[]) {
     // Initialize GW-BASIC components
     auto tokenizer = std::make_shared<Tokenizer>();
     auto programStore = std::make_shared<ProgramStore>();
-    auto dispatcher = std::make_unique<BasicDispatcher>(tokenizer, programStore, nullptr, nullptr);
+    auto dispatcher = std::make_unique<BasicDispatcher>(tokenizer, programStore, 
+        [](const std::string& text) { std::cout << text; },  // print callback
+        [](const std::string& prompt) -> std::string {       // input callback
+            std::cout << prompt;
+            std::string input;
+            std::getline(std::cin, input);
+            return input;
+        });
+    
+    // Create InterpreterLoop for proper program execution
+    auto interpreter = std::make_unique<InterpreterLoop>(programStore, tokenizer);
+    
+    // Connect event trap system between interpreter and dispatcher
+    interpreter->setEventTrapSystem(dispatcher->getEventTrapSystem());
+    
+    interpreter->setStatementHandler([&dispatcher](const std::vector<uint8_t>& tokens, uint16_t currentLine) -> uint16_t {
+        try {
+            auto result = (*dispatcher)(tokens, currentLine);
+            if (result == 0xFFFF) {
+                // END/STOP encountered
+                return 0xFFFF; // propagate halt sentinel
+            }
+            return result;
+        } catch (const std::exception& e) {
+            std::cerr << "Error: " << e.what() << std::endl;
+            return 0;
+        }
+    });
     
     std::cout << "GW-BASIC Interpreter v0.1\n";
     std::cout << "Copyright (C) 2025\n";
@@ -965,6 +996,12 @@ int runConsoleMode(int argc, char* argv[]) {
             std::string upperInput = inputLine;
             std::transform(upperInput.begin(), upperInput.end(), upperInput.begin(), ::toupper);
             
+            // Handle SYSTEM (exit) before tokenization to avoid spurious syntax errors
+            if (upperInput == "SYSTEM") {
+                // Emulate GW-BASIC SYSTEM: exit interpreter
+                break; // leave input loop, program will return
+            }
+
             if (upperInput == "LIST") {
                 if (programStore->isEmpty()) {
                     std::cout << "Ok\n";
@@ -983,27 +1020,9 @@ int runConsoleMode(int argc, char* argv[]) {
                 if (programStore->isEmpty()) {
                     std::cout << "?Illegal function call\n";
                 } else {
-                    // Execute program line by line
+                    // Use InterpreterLoop for proper execution
                     try {
-                        auto it = programStore->begin();
-                        while (it != programStore->end()) {
-                            auto result = (*dispatcher)(it->tokens, it->lineNumber);
-                            if (result == 0xFFFF) {
-                                // END/STOP encountered
-                                break;
-                            } else if (result != 0) {
-                                // Jump to line number - find it
-                                auto jumpIt = programStore->findLine(result);
-                                if (jumpIt.isValid()) {
-                                    it = jumpIt;
-                                } else {
-                                    std::cout << "?Undefined line number " << result << "\n";
-                                    break;
-                                }
-                            } else {
-                                ++it;
-                            }
-                        }
+                        interpreter->run();
                     } catch (const std::exception& e) {
                         outputError("Runtime error: " + std::string(e.what()));
                     }

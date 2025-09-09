@@ -395,9 +395,9 @@ std::string Tokenizer::detokenize(const std::vector<uint8_t>& tokens) {
                 i++;
             }
         } else if (token == 0x11) {
-            // Integer constant
+            // Integer constant (little-endian stored)
             if (i + 2 < tokens.size()) {
-                int16_t intVal = tokens[i + 1] | (tokens[i + 2] << 8);
+                int16_t intVal = static_cast<int16_t>(tokens[i + 1] | (tokens[i + 2] << 8));
                 result << intVal;
                 i += 3;
             } else {
@@ -971,11 +971,11 @@ std::vector<uint8_t> Tokenizer::encodeNumber(double value, TokenType type) {
     
     switch (type) {
         case TOKEN_NUMBER_INT: {
-            // Integer constants (16-bit) - use correct GW-BASIC encoding
+            // Integer constants (16-bit) - revert to little-endian
             int16_t intVal = static_cast<int16_t>(value);
-            bytes.push_back(0x11); // Integer token marker (from GW-BASIC)
-            bytes.push_back(intVal & 0xFF);
-            bytes.push_back((intVal >> 8) & 0xFF);
+            bytes.push_back(0x11); // Integer token marker
+            bytes.push_back(intVal & 0xFF);        // low byte first (little-endian)
+            bytes.push_back((intVal >> 8) & 0xFF); // high byte second
             break;
         }
         case TOKEN_NUMBER_FLOAT: {

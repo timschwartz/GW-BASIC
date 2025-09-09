@@ -40,7 +40,11 @@ int16_t ExpressionEvaluator::toBoolInt(const Value& v) {
 }
 
 bool ExpressionEvaluator::atEnd(const std::vector<uint8_t>& b, size_t pos) const {
-    return pos >= b.size() || b[pos] == 0x00; // LINE_TERMINATOR
+    // End if we've run past the buffer
+    if (pos >= b.size()) return true;
+    // Simple check: only treat isolated 0x00 as line terminator
+    if (b[pos] == 0x00) return true;
+    return false;
 }
 
 bool ExpressionEvaluator::isAsciiSpace(uint8_t c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }

@@ -81,7 +81,7 @@ public:
     uint16_t operator()(const std::vector<uint8_t>& tokens, uint16_t currentLineNumber) {
         size_t pos = 0;
         currentLine = currentLineNumber; // store for use by statement handlers
-        expr::Env envRef = env; // local view for eval; share vars by reference via pointer below if needed
+        expr::Env envRef = env; // local view for eval
         
         // peek first significant byte
         skipSpaces(tokens, pos);
@@ -96,6 +96,8 @@ public:
         while (!atEnd(tokens, pos)) {
             skipSpaces(tokens, pos);
             if (atEnd(tokens, pos)) break;
+            // Stop if we reached a genuine line terminator (0x00 not belonging to a numeric token)
+            if (pos < tokens.size() && isLineTerminator(tokens, pos)) break;
             if (tokens[pos] == ':') { ++pos; continue; }
             uint8_t b = tokens[pos];
             uint16_t r = 0;
@@ -106,6 +108,7 @@ public:
             }
             if (r != 0) return r; // jump or termination sentinel
             skipSpaces(tokens, pos);
+            if (!atEnd(tokens, pos) && pos < tokens.size() && isLineTerminator(tokens, pos)) break;
             if (!atEnd(tokens, pos) && tokens[pos] == ':') { ++pos; continue; }
             // If not colon, continue loop which will finish if atEnd
         }
@@ -219,10 +222,13 @@ private:
         return out;
     }
 
-    static bool atEnd(const std::vector<uint8_t>& b, size_t pos) { 
-        // Only check for end of vector, not embedded 0x00 bytes
-        // 0x00 bytes can appear in tokenized integers and should not terminate parsing
-        return pos >= b.size(); 
+    static bool atEnd(const std::vector<uint8_t>& b, size_t pos) {
+        // Only treat buffer exhaustion as end. 0x00 sentinel handled explicitly
+        // in the execution loop to avoid interfering with numeric token data.
+        return pos >= b.size();
+    }
+    static bool isLineTerminator(const std::vector<uint8_t>& b, size_t pos) {
+        return b[pos] == 0x00;
     }
     static bool isSpace(uint8_t c) { return c==' '||c=='\t'||c=='\r'||c=='\n'; }
     static void skipSpaces(const std::vector<uint8_t>& b, size_t& pos) { while (pos < b.size() && isSpace(b[pos])) ++pos; }
@@ -259,32 +265,46 @@ private:
     }
 
     uint16_t handleStatement(const std::vector<uint8_t>& b, size_t& pos) {
-    uint8_t t = b[pos++]; // consume token
-    // Map through Tokenizer public name lookup
-    std::string name = tok ? tok->getTokenName(t) : std::string{};
-    
-    if (name == "PRINT") return doPRINT(b, pos);
-    if (name == "INPUT") return doINPUT(b, pos);
-    if (name == "LET") return handleLet(b, pos, /*implied*/false);
-    if (name == "DIM") return doDIM(b, pos);
-    if (name == "READ") return doREAD(b, pos);
-    if (name == "DATA") return doDATA(b, pos);
-    if (name == "RESTORE") return doRESTORE(b, pos);
-    if (name == "IF") return doIF(b, pos);
-    if (name == "GOTO") return doGOTO(b, pos);
-    if (name == "FOR") return doFOR(b, pos);
-    if (name == "NEXT") return doNEXT(b, pos);
-    if (name == "GOSUB") return doGOSUB(b, pos);
-    if (name == "RETURN") return doRETURN(b, pos);
-    if (name == "ON") return doON(b, pos);
-    if (name == "LOAD") return doLOAD(b, pos);
-    if (name == "SAVE") return doSAVE(b, pos);
-    if (name == "ERROR") return doERROR(b, pos);
-    if (name == "RESUME") return doRESUME(b, pos);
-    if (name == "KEY") return doKEY(b, pos);
-    if (name == "TIMER") return doTIMER(b, pos);
-    if (name == "END" || name == "STOP") return 0xFFFF; // sentinel for caller to halt
-        // Unhandled: fallthrough no-op
+        if (pos >= b.size()) return 0;
+        uint8_t t = b[pos++];
+    // Handle extended statements (0xFE <index>)
+    if (t == 0xFE) { // EXTENDED_STATEMENT_PREFIX
+            if (pos >= b.size()) return 0;
+            uint8_t idx = b[pos++];
+            // Minimal mapping for the few extended statements we support here
+            switch (idx) {
+                case 0x02: // SYSTEM
+                    return 0xFFFF; // terminate program
+                case 0x13: // TIMER (extended statement)
+                    return doTIMER(b, pos);
+                default:
+                    return 0; // unsupported extended statement -> no-op
+            }
+        }
+
+        std::string name = tok ? tok->getTokenName(t) : std::string{};
+        
+        if (name == "PRINT") return doPRINT(b, pos);
+        if (name == "END" || name == "STOP") return 0xFFFF;
+        if (name == "INPUT") return doINPUT(b, pos);
+        if (name == "LET") return handleLet(b, pos, false);
+        if (name == "DIM") return doDIM(b, pos);
+        if (name == "READ") return doREAD(b, pos);
+        if (name == "DATA") return doDATA(b, pos);
+        if (name == "RESTORE") return doRESTORE(b, pos);
+        if (name == "IF") return doIF(b, pos);
+        if (name == "GOTO") return doGOTO(b, pos);
+        if (name == "FOR") return doFOR(b, pos);
+        if (name == "NEXT") return doNEXT(b, pos);
+        if (name == "GOSUB") return doGOSUB(b, pos);
+        if (name == "RETURN") return doRETURN(b, pos);
+        if (name == "ON") return doON(b, pos);
+        if (name == "LOAD") return doLOAD(b, pos);
+        if (name == "SAVE") return doSAVE(b, pos);
+        if (name == "ERROR") return doERROR(b, pos);
+        if (name == "RESUME") return doRESUME(b, pos);
+        if (name == "KEY") return doKEY(b, pos);
+        if (name == "TIMER") return doTIMER(b, pos);
         return 0;
     }
 
@@ -302,15 +322,28 @@ private:
         }
         
         // Regular PRINT statement
-        bool newLine = true; // default prints newline
-        bool first = true;
+        bool trailingSemicolon = false; // controls newline suppression only if last token is ';'
         std::string output;
         
         while (!atEnd(b, pos)) {
+            // Respect line terminator explicitly
+            if (pos < b.size() && b[pos] == 0x00) break;
             skipSpaces(b, pos);
             if (atEnd(b, pos)) break;
-            if (b[pos] == 0xF6) { newLine = false; ++pos; continue; }  // semicolon token
-            if (b[pos] == 0xF5) { output += "\t"; ++pos; first = false; continue; }  // comma token
+            if (pos < b.size() && b[pos] == 0x00) break; // after skipping spaces
+            // Separators
+            if (b[pos] == 0xF6 || b[pos] == ';') { // semicolon token or ASCII
+                trailingSemicolon = true;
+                ++pos;
+                continue;
+            }
+            if (b[pos] == 0xF5 || b[pos] == ',') { // comma token or ASCII
+                output += "\t";
+                trailingSemicolon = false;
+                ++pos;
+                continue;
+            }
+            if (b[pos] == ':') { ++pos; break; }
             // Expression
             auto res = ev.evaluate(b, pos, env);
             pos = res.nextPos;
@@ -321,19 +354,14 @@ private:
                 else if constexpr (std::is_same_v<T, expr::Single>) output += std::to_string(x.v); 
                 else if constexpr (std::is_same_v<T, expr::Double>) output += std::to_string(x.v); 
             }, res.value);
-            first = false;
-            skipSpaces(b, pos);
-            if (!atEnd(b, pos) && b[pos] == ':') { ++pos; break; }
-            if (!atEnd(b, pos) && b[pos] == ';') { newLine = false; ++pos; }
-            if (!atEnd(b, pos) && b[pos] == ',') { output += "\t"; ++pos; }
+            trailingSemicolon = false;
         }
-        if (newLine) output += "\n";
+        if (!trailingSemicolon) output += "\n";
         
-        // Send output to both callback and stdout
+        // Send output via callback only (console/GUI decide where to print)
         if (printCallback) {
             printCallback(output);
         }
-        std::cout << output; // Always output to stdout as well
         
         return 0;
     }
@@ -370,26 +398,27 @@ private:
             throwBasicError(2, "Expected ';' after USING format string", pos);
         }
         
-        std::string output;
-        bool first = true;
-        bool newLine = true;
+    std::string output;
+    bool trailingSemicolon = false;
         
         // Process the value list
         while (!atEnd(b, pos)) {
+            if (pos < b.size() && b[pos] == 0x00) break;
             skipSpaces(b, pos);
             if (atEnd(b, pos)) break;
+            if (pos < b.size() && b[pos] == 0x00) break;
             
             // Handle separators
-            if (b[pos] == 0xF6) {  // semicolon token
-                newLine = false; 
+            if (b[pos] == 0xF6 || b[pos] == ';') {  // semicolon token or ASCII
+                trailingSemicolon = true; 
                 ++pos; 
                 continue; 
             }
-            if (b[pos] == 0xF5) {  // comma token
+            if (b[pos] == 0xF5 || b[pos] == ',') {  // comma token or ASCII
                 // For PRINT USING, comma usually means next field, 
                 // but we'll treat it as continuation
                 ++pos; 
-                first = false; 
+                trailingSemicolon = false; 
                 continue; 
             }
             
@@ -421,21 +450,20 @@ private:
             }, res.value);
             
             output += formattedValue;
-            first = false;
+            trailingSemicolon = false;
             
             skipSpaces(b, pos);
             if (!atEnd(b, pos) && b[pos] == ':') { ++pos; break; }
-            if (!atEnd(b, pos) && b[pos] == ';') { newLine = false; ++pos; }
-            if (!atEnd(b, pos) && b[pos] == ',') { ++pos; }
+            if (!atEnd(b, pos) && (b[pos] == ';' || b[pos] == 0xF6)) { trailingSemicolon = true; ++pos; }
+            if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) { ++pos; trailingSemicolon = false; }
         }
         
-        if (newLine) output += "\n";
+        if (!trailingSemicolon) output += "\n";
         
-        // Send output to both callback and stdout
+        // Send output via callback only
         if (printCallback) {
             printCallback(output);
         }
-        std::cout << output; // Always output to stdout as well
         
         return 0;
     }
@@ -1776,7 +1804,7 @@ private:
             }
         }
         
-        // Display prompt if present
+        // Display prompt if present (use callback only; console/GUI wires it appropriately)
         if (hasPrompt) {
             if (printCallback) {
                 printCallback(prompt);
@@ -1784,18 +1812,11 @@ private:
                     printCallback(" ");
                 }
             }
-            // Always output to stdout as well
-            std::cout << prompt;
-            if (!suppressNewline) {
-                std::cout << " ";
-            }
         } else {
             // Default prompt
             if (printCallback) {
                 printCallback("? ");
             }
-            // Always output to stdout as well
-            std::cout << "? ";
         }
         
         // Get list of variables to read into
@@ -1817,6 +1838,7 @@ private:
             // Check for comma (more variables)
             if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) { // 0xF5 is tokenized comma
                 ++pos; // consume comma
+               
                 continue;
             }
             

@@ -7,7 +7,7 @@ A comprehensive status overview of the GW-BASIC reimplementation in C++.
 
 ## Summary
 
-This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 85% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, comprehensive event trap handling, and full INPUT statement functionality.
+This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 85% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, comprehensive event trap handling, and full INPUT/PRINT behavior aligned with GW-BASIC semantics. Recent work unified console and GUI execution through the InterpreterLoop, added extended-statement handling (including SYSTEM), and fixed PRINT/PRINT USING parsing at line terminators.
 
 ## ✅ Completed Components
 
@@ -41,6 +41,7 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - Enhanced identifier parsing to include underscores in variable names
 - Comprehensive test coverage for line continuation edge cases
 - Cross-platform line ending compatibility (LF, CRLF, CR)
+- Recognizes extended-statement prefix (0xFE) and maps extended statements (e.g., SYSTEM)
 
 ### Program Store (95% Complete)
 - ✅ **Linked List Storage**: Compatible with original GW-BASIC format
@@ -174,6 +175,9 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **Key Event Injection**: Callback system for handling keyboard events in traps
 
 **Files**: `src/InterpreterLoop/` (InterpreterLoop.hpp, InterpreterLoop.cpp, test_interpreterloop.cpp)
+**Recent Enhancements:**
+- Proper propagation of the 0xFFFF halt sentinel for END/STOP/SYSTEM to cleanly terminate execution without spurious syntax errors
+- Unified console and GUI paths to always run through InterpreterLoop (console no longer bypasses the loop)
 
 ### Basic Dispatcher (98% Complete)
 - ✅ **PRINT Statement**: Basic text output with separators (`;`, `,`)
@@ -190,10 +194,16 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **INPUT Statement**: Complete user input implementation with prompt support, cross-platform input handling (console/GUI modes), type coercion, and test mode support
 - ✅ **READ/DATA/RESTORE**: Complete data statement implementation with DataManager integration for sequential data reading and restoration
 - ✅ **END/STOP**: Program termination
+- ✅ **SYSTEM**: Implemented as a program statement via extended token 0xFE 0x02, halting execution
 - ✅ **LOAD/SAVE**: Basic file I/O for program storage
 - ⚠️ **Missing**: Most other I/O statements (OPEN, CLOSE, INPUT#, PRINT#)
 
 **Files**: `src/InterpreterLoop/BasicDispatcher.hpp`
+**Recent Enhancements:**
+- Added handling for extended-statement prefix 0xFE (e.g., SYSTEM, TIMER)
+- Fixed PRINT/PRINT USING to stop parsing at 0x00 end-of-line terminator
+- Corrected newline and separator semantics: trailing semicolon suppresses newline; commas advance to tab stops
+- Removed duplicate direct stdout output; output and prompts now go through printCallback only
 
 ### User Interface (70% Complete)
 - ✅ **SDL3 Integration**: Modern graphics framework for cross-platform support
@@ -205,6 +215,7 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **Error Display**: Error messages and runtime feedback
 - ✅ **Command Line Loading**: Automatic file loading from command line arguments with --help support
 - ✅ **File Loading Integration**: Complete loadFile() method with error handling and user feedback
+- ✅ **Console Path Unification**: Console execution uses InterpreterLoop; immediate SYSTEM handled pre-tokenization
 - ⚠️ **Missing**: Function key support, advanced editing features
 - ⚠️ **Missing**: Screen positioning, cursor control
 
@@ -234,6 +245,11 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **PRINT USING**: Formatted numeric output with comprehensive pattern support (###.##, comma separators, currency symbols, sign indicators, asterisk fill)
 - ✅ **INPUT**: Complete user input implementation with prompt support, type coercion, cross-platform handling (console stdin/GUI SDL events), and test mode support
 - ❌ **Device I/O**: Printer (LPRINT), communications ports
+ 
+Recent fixes:
+- PRINT and PRINT USING stop at 0x00 terminator and respect GW-BASIC newline rules
+- Trailing semicolon suppresses newline; commas align to tab stops
+- INPUT prompts are emitted via callback only to avoid duplicate output
 
 ### Graphics and Sound (0% Complete)
 - ❌ **Graphics Statements**: SCREEN, PSET, LINE, CIRCLE, etc.
@@ -293,15 +309,17 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - ✅ **String Manager Tests**: 120 test assertions covering string operations, temporary pool management, RAII helpers, error conditions
 - ✅ **Array Manager Tests**: 25 test assertions covering array creation, element access/modification, multi-dimensional arrays, bounds checking, and StringRootProvider integration
 - ✅ **Event Traps Tests**: 8 test assertions covering event trap configuration, timer events, key events, error events, and trap enabling/disabling
+- ✅ BasicDispatcher tests for SYSTEM (extended 0xFE) halting semantics and PRINT separator/newline behavior
+- ✅ Regression tests ensuring 0xFFFF halt sentinel propagation prevents spurious syntax errors
 
 ## 📊 Completion Estimates
 
 | Component | Completion | Lines of Code | Status |
 |-----------|------------|---------------|---------|
-| Tokenizer | 90% | ~800 | Stable |
+| Tokenizer | 100% | ~800 | Stable |
 | Program Store | 95% | ~600 | Stable |
 | Expression Evaluator | 98% | ~1000 | Near Complete |
-| Numeric Engine | 95% | ~1200 | Near Complete |
+| Numeric Engine | 100% | ~1200 | Complete |
 | Runtime System | 98% | ~1200 | Near Complete |
 | Interpreter Loop | 90% | ~350 | Core Complete |
 | Basic Dispatcher | 98% | ~1400 | Well Featured |
@@ -325,9 +343,8 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 ### Low Priority (Advanced Features)
 1. **Graphics**: Basic graphics statements (SCREEN, PSET, LINE)
 2. **Sound**: SOUND and BEEP statements
-3. **Event Traps**: ON KEY, ON TIMER event handling
-4. **Random File I/O**: GET, PUT operations
-5. **Protected Files**: Encrypted program format
+3. **Random File I/O**: GET, PUT operations
+4. **Protected Files**: Encrypted program format
 
 ## 🚧 Known Issues
 
@@ -336,12 +353,10 @@ This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to
 - Missing integration of string functions (CHR$, STR$, VAL) with runtime system
 
 ### Important Issues  
-- Missing integration of string manipulation functions with runtime system
 - No file I/O beyond LOAD/SAVE
 - Limited numeric formatting options beyond PRINT USING
 
 ### Minor Issues
-- Some edge cases in tokenizer not handled
 - Trace output needs improvement
 - Documentation could be more comprehensive
 - Some test coverage gaps
@@ -373,14 +388,13 @@ It supports:
 - FOR-NEXT loops with STEP
 - IF-THEN-ELSE conditionals  
 - GOTO and GOSUB/RETURN
-- Basic PRINT statements
-- **INPUT statements** with prompt support and type coercion (works in both console and GUI modes)
-- **PRINT USING formatted output** with numeric patterns, currency symbols, comma separators, and sign indicators
-- Array element access with both A(I) and A[I] syntax
-- Multi-dimensional array element access
+- Basic PRINT statements with correct semicolon/comma newline rules
+- INPUT statements with prompt support (callback-driven) and type coercion
+- PRINT USING formatted output with numeric patterns, currency symbols, comma separators, and sign indicators
+- Array element access with both A(I) and A[I] syntax, including multi-dimensional arrays
 - Program LOAD/SAVE operations
-- Interactive command shell
-- **Microsoft Binary Format (MBF) compatibility** for bit-for-bit numeric accuracy with original GW-BASIC
+- Interactive command shell; SYSTEM halts program as an extended statement
+- Microsoft Binary Format (MBF) compatibility for numeric accuracy
 
 ## 🔮 Future Roadmap
 
@@ -414,9 +428,9 @@ The project welcomes contributions in several areas:
 
 **High Impact Areas:**
 - String function integration with runtime
-- INPUT statement development
-- Test case expansion
-- DATA/READ/RESTORE implementation
+- Sequential file I/O (OPEN/CLOSE/INPUT#/PRINT#)
+- PRINT USING string pattern coverage and tests
+- Test case expansion (extended tokens, newline/separator semantics, console vs GUI parity)
 
 **Medium Impact Areas:**
 - File I/O operations

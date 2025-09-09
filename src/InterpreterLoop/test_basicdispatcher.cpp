@@ -14,29 +14,26 @@ static std::vector<uint8_t> crunchStmt(Tokenizer& t, const std::string& source) 
 
 TEST_CASE("BasicDispatcher PRINT literal", "[dispatcher]") {
     Tokenizer tok;
-    auto disp = BasicDispatcher(std::make_shared<Tokenizer>(tok), nullptr, nullptr, nullptr);
-    disp.setTestMode(true);
+    std::string captured;
+    auto printer = [&](const std::string& s){ captured += s; };
+    auto disp = BasicDispatcher(std::make_shared<Tokenizer>(tok), nullptr, printer, nullptr);
     disp.setTestMode(true);
     auto stmt = crunchStmt(tok, "PRINT \"X\"");
-    std::ostringstream out;
-    auto* oldBuf = std::cout.rdbuf(out.rdbuf());
     auto r = disp(stmt);
-    std::cout.rdbuf(oldBuf);
     REQUIRE(r == 0);
-    REQUIRE(out.str() == std::string("X\n"));
+    REQUIRE(captured == std::string("X\n"));
 }
 
 TEST_CASE("BasicDispatcher LET + IF THEN ELSE inline", "[dispatcher]") {
     Tokenizer tok;
-    auto disp = BasicDispatcher(std::make_shared<Tokenizer>(tok), nullptr, nullptr, nullptr);
+    std::string captured;
+    auto printer = [&](const std::string& s){ captured += s; };
+    auto disp = BasicDispatcher(std::make_shared<Tokenizer>(tok), nullptr, printer, nullptr);
     disp.setTestMode(true);
     auto stmt = crunchStmt(tok, "A=0:IF A THEN PRINT \"T\" ELSE PRINT \"F\"");
-    std::ostringstream out;
-    auto* oldBuf = std::cout.rdbuf(out.rdbuf());
     auto r = disp(stmt);
-    std::cout.rdbuf(oldBuf);
     REQUIRE(r == 0);
-    REQUIRE(out.str() == std::string("F\n"));
+    REQUIRE(captured == std::string("F\n"));
 }
 
 TEST_CASE("BasicDispatcher GOTO returns jump target", "[dispatcher]") {
@@ -140,4 +137,25 @@ TEST_CASE("BasicDispatcher ON GOTO with single line number", "[dispatcher]") {
     auto stmt = crunchStmt(tok, "ON 1 GOTO 999");
     auto r = disp(stmt);
     REQUIRE(r == 999);
+}
+
+TEST_CASE("BasicDispatcher PRINT separators ; and ,", "[dispatcher]") {
+    Tokenizer tok;
+    std::string captured;
+    auto printer = [&](const std::string& s){ captured += s; };
+    auto disp = BasicDispatcher(std::make_shared<Tokenizer>(tok), nullptr, printer, nullptr);
+    disp.setTestMode(true);
+    auto stmt = crunchStmt(tok, "PRINT \"A\";\"B\",\"C\"");
+    auto r = disp(stmt);
+    REQUIRE(r == 0);
+    REQUIRE(captured == std::string("AB\tC\n"));
+}
+
+TEST_CASE("BasicDispatcher SYSTEM statement halts program", "[dispatcher]") {
+    Tokenizer tok; // Tokenizer maps SYSTEM as extended 0xFE 0x02
+    auto disp = BasicDispatcher(std::make_shared<Tokenizer>(tok), nullptr, nullptr, nullptr);
+    disp.setTestMode(true);
+    auto stmt = crunchStmt(tok, "SYSTEM");
+    auto r = disp(stmt);
+    REQUIRE(r == 0xFFFF);
 }
