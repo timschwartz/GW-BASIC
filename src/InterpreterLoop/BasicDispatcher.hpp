@@ -38,9 +38,10 @@ public:
     using PrintCallback = std::function<void(const std::string&)>;
     using InputCallback = std::function<std::string(const std::string&)>; // prompt -> input
     using ScreenModeCallback = std::function<bool(int)>; // mode -> success
+    using ColorCallback = std::function<bool(int, int)>; // foreground, background -> success
     
-    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr, ScreenModeCallback screenCb = nullptr)
-        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb) {
+    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr, ScreenModeCallback screenCb = nullptr, ColorCallback colorCb = nullptr)
+        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb), colorCallback(colorCb) {
         // Wire up cross-references
         vars.setStringHeap(&strHeap);
         vars.setArrayManager(&arrayManager);
@@ -145,6 +146,7 @@ private:
     PrintCallback printCallback;
     InputCallback inputCallback;
     ScreenModeCallback screenModeCallback;
+    ColorCallback colorCallback;
     uint16_t currentLine = 0; // Current line number being executed
     bool testMode = false; // Set to true to avoid waiting for input in tests
 
@@ -309,6 +311,7 @@ private:
         if (name == "KEY") return doKEY(b, pos);
         if (name == "TIMER") return doTIMER(b, pos);
         if (name == "SCREEN") return doSCREEN(b, pos);
+        if (name == "COLOR") return doCOLOR(b, pos);
         return 0;
     }
 
@@ -1872,6 +1875,73 @@ private:
                 throwBasicError(5, "Illegal function call: Invalid screen mode " + std::to_string(mode), 0);
                 break;
         }
+        
+        return 0;
+    }
+
+    uint16_t doCOLOR(const std::vector<uint8_t>& b, size_t& pos) {
+        // COLOR statement implementation
+        // Syntax: COLOR [foreground][,[background][,border]]
+        // In GW-BASIC: COLOR foreground,background,border
+        // For simplicity, we'll implement: COLOR foreground[,background]
+        
+        skipSpaces(b, pos);
+        
+        int16_t foreground = -1;  // -1 means no change
+        int16_t background = -1;  // -1 means no change
+        
+        // Parse foreground color (optional)
+        if (!atEnd(b, pos) && b[pos] != ',' && b[pos] != 0xF5 && b[pos] != ':' && b[pos] != 0x00) {
+            auto res = ev.evaluate(b, pos, env);
+            pos = res.nextPos;
+            foreground = expr::ExpressionEvaluator::toInt16(res.value);
+            
+            // Validate foreground color range (0-15 for CGA/EGA/VGA)
+            if (foreground < 0 || foreground > 15) {
+                throwBasicError(5, "Illegal function call: Invalid foreground color " + std::to_string(foreground), pos);
+                return 0;
+            }
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Check for comma (background parameter)
+        if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) { // 0xF5 is tokenized comma
+            ++pos; // consume comma
+            skipSpaces(b, pos);
+            
+            // Parse background color (optional)
+            if (!atEnd(b, pos) && b[pos] != ',' && b[pos] != 0xF5 && b[pos] != ':' && b[pos] != 0x00) {
+                auto res = ev.evaluate(b, pos, env);
+                pos = res.nextPos;
+                background = expr::ExpressionEvaluator::toInt16(res.value);
+                
+                // Validate background color range (0-7 for most modes)
+                if (background < 0 || background > 7) {
+                    throwBasicError(5, "Illegal function call: Invalid background color " + std::to_string(background), pos);
+                    return 0;
+                }
+            }
+        }
+        
+        // Execute COLOR command
+        return executeColorChange(foreground, background);
+    }
+    
+    uint16_t executeColorChange(int16_t foreground, int16_t background) {
+        // Try to change colors via callback
+        bool success = false;
+        if (colorCallback) {
+            success = colorCallback(foreground, background);
+        }
+        
+        if (!success && colorCallback) {
+            throwBasicError(5, "Illegal function call: Could not set colors", 0);
+            return 0;
+        }
+        
+        // Note: In original GW-BASIC, COLOR command doesn't print anything
+        // The color change is silent and takes effect immediately
         
         return 0;
     }

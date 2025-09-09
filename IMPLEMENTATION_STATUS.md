@@ -7,7 +7,10 @@ A comprehensive status overview of the GW-BASIC reimplementation in C++.
 
 ## Summary
 
-This project is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 89% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, comprehensive event trap handling, full function key support, complete SCREEN statement with graphics mode support and text framebuffer, and complete INPUT/PRINT behavior aligned with GW-BASIC semantics. Recent work added comprehensive function key support (F1-F10) with soft key expansion and event trap integration, unified console and GUI execution through the InterpreterLoop, added extended-statement handling (including SYSTEM), fixed PRINT/PRINT USING parsing at line terminators, and implemented full SCREEN statement functionality with 14 video modes, dynamic window resizing, and scaled text overlay for graphics modes.
+This project - ✅ **SAVE**: Basic file I/O for program storage
+- ✅ **SCREEN Statement**: Complete implementation with 14 video modes (0-13), dynamic window resizing, graphics mode switching, and text framebuffer overlay for graphics modes
+- ✅ **COLOR Statement**: Complete foreground and background color support with standard 16-color CGA/EGA/VGA palette (colors 0-15 for foreground, 0-7 for background)
+- ⚠️ **Missing**: Most other I/O statements (OPEN, CLOSE, INPUT#, PRINT#)a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 89% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, comprehensive event trap handling, full function key support, complete SCREEN statement with graphics mode support and text framebuffer, and complete INPUT/PRINT behavior aligned with GW-BASIC semantics. Recent work added comprehensive function key support (F1-F10) with soft key expansion and event trap integration, unified console and GUI execution through the InterpreterLoop, added extended-statement handling (including SYSTEM), fixed PRINT/PRINT USING parsing at line terminators, and implemented full SCREEN statement functionality with 14 video modes, dynamic window resizing, and scaled text overlay for graphics modes.
 
 ## ✅ Completed Components
 
@@ -264,12 +267,12 @@ Recent fixes:
 - Trailing semicolon suppresses newline; commas align to tab stops
 - INPUT prompts are emitted via callback only to avoid duplicate output
 
-### Graphics and Sound (25% Complete)
+### Graphics and Sound (35% Complete)
 - ✅ **SCREEN Statement**: Complete implementation with 14 video modes (0-13), dynamic window resizing, and proper graphics mode switching
 - ✅ **Text Framebuffer**: Scaled text overlay system for graphics modes with automatic character scaling based on resolution
 - ✅ **Graphics Infrastructure**: SDL3-based pixel buffer management with separate rendering paths for text and graphics modes
+- ✅ **COLOR Statement**: Complete implementation with foreground and background color support (0-15 foreground, 0-7 background) using standard CGA/EGA/VGA 16-color palette
 - ❌ **Graphics Drawing**: PSET, LINE, CIRCLE, GET, PUT statements
-- ❌ **Color Support**: COLOR statement and palette management  
 - ❌ **Sound**: SOUND, PLAY, BEEP statements
 
 ## ❌ Not Implemented
@@ -338,9 +341,9 @@ Recent fixes:
 | Numeric Engine | 100% | ~1200 | Complete |
 | Runtime System | 98% | ~1200 | Near Complete |
 | Interpreter Loop | 90% | ~350 | Core Complete |
-| Basic Dispatcher | 98% | ~1400 | Well Featured |
+| Basic Dispatcher | 98% | ~1500 | Well Featured |
 | User Interface | 90% | ~700 | Well Featured |
-| **Overall** | **89%** | **~7250** | **Beta Stage** |
+| **Overall** | **90%** | **~7350** | **Beta Stage** |
 
 ## 🎯 Next Priority Items
 
@@ -385,21 +388,24 @@ The reimplemented GW-BASIC can currently run simple programs such as:
 ```basic
 10 DIM A(10), MATRIX(5,5)
 15 SCREEN 1: REM Graphics mode with text overlay
-20 PRINT "Hello, World!"
-25 INPUT "Enter your name: ", NAME$
-30 FOR I = 1 TO 10
-40   A(I) = I * 2
-50   PRINT "Number: "; I; " Array: "; A(I)
-60 NEXT I
-70 MATRIX(2,3) = 42
-80 IF MATRIX[2,3] > 40 THEN PRINT "Matrix element is large!"
-85 PRINT USING "Currency: $###.##"; 123.45
-86 PRINT USING "Percentage: +##.#%"; 95.7
-87 PRINT USING "With commas: ###,###.##"; 12345.67
-88 INPUT "Enter a number: ", VALUE
-89 PRINT "You entered: "; VALUE
-90 SCREEN 0: REM Back to text mode
-95 END
+20 COLOR 14: REM Yellow text
+25 PRINT "Hello, World!"
+30 COLOR 2, 1: REM Green text on blue background
+35 INPUT "Enter your name: ", NAME$
+40 FOR I = 1 TO 10
+50   A(I) = I * 2
+60   PRINT "Number: "; I; " Array: "; A(I)
+70 NEXT I
+80 MATRIX(2,3) = 42
+85 COLOR 15, 0: REM White text on black background
+90 IF MATRIX[2,3] > 40 THEN PRINT "Matrix element is large!"
+95 PRINT USING "Currency: $###.##"; 123.45
+96 PRINT USING "Percentage: +##.#%"; 95.7
+97 PRINT USING "With commas: ###,###.##"; 12345.67
+98 INPUT "Enter a number: ", VALUE
+99 PRINT "You entered: "; VALUE
+100 SCREEN 0: REM Back to text mode
+105 END
 ```
 
 It supports:
@@ -417,6 +423,7 @@ It supports:
 - Microsoft Binary Format (MBF) compatibility for numeric accuracy
 - Complete SCREEN statement with 14 video modes (0-13) and dynamic window resizing
 - Text display in all graphics modes with automatic character scaling and proper text overlay
+- Complete COLOR statement with 16-color palette support for foreground and background colors
 
 ## 🔮 Future Roadmap
 

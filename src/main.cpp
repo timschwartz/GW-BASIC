@@ -48,6 +48,30 @@ private:
     static constexpr Color CYAN = {0, 255, 255, 255};
     static constexpr Color BLUE = {0, 0, 255, 255};
     
+    // Standard 16-color CGA/EGA/VGA palette
+    static constexpr Color PALETTE[16] = {
+        {0,   0,   0,   255}, // 0  Black
+        {0,   0,   170, 255}, // 1  Blue
+        {0,   170, 0,   255}, // 2  Green
+        {0,   170, 170, 255}, // 3  Cyan
+        {170, 0,   0,   255}, // 4  Red
+        {170, 0,   170, 255}, // 5  Magenta
+        {170, 85,  0,   255}, // 6  Brown
+        {170, 170, 170, 255}, // 7  Light Gray
+        {85,  85,  85,  255}, // 8  Dark Gray
+        {85,  85,  255, 255}, // 9  Light Blue
+        {85,  255, 85,  255}, // 10 Light Green
+        {85,  255, 255, 255}, // 11 Light Cyan
+        {255, 85,  85,  255}, // 12 Light Red
+        {255, 85,  255, 255}, // 13 Light Magenta
+        {255, 255, 85,  255}, // 14 Yellow
+        {255, 255, 255, 255}  // 15 White
+    };
+    
+    // Current text colors
+    int currentForeground = 7;  // Default light gray
+    int currentBackground = 0;  // Default black
+    
     // Text buffer (screen memory)
     struct ScreenChar {
         char ch;
@@ -115,11 +139,12 @@ public:
             std::cerr << "TRACE " << ln << ": ";
             for (auto x : b) fprintf(stderr, "%02X ", x);
             std::cerr << "\n";
-        });        // Create dispatcher with print, input, and screen mode callbacks
+        });        // Create dispatcher with print, input, screen mode, and color callbacks
         dispatcher = std::make_unique<BasicDispatcher>(tokenizer, programStore,
             [this](const std::string& text) { print(text); },
             [this](const std::string& prompt) -> std::string { return getInput(prompt); },
-            [this](int mode) -> bool { return changeScreenMode(mode); });
+            [this](int mode) -> bool { return changeScreenMode(mode); },
+            [this](int foreground, int background) -> bool { return changeColor(foreground, background); });
         
         // Connect event trap system between interpreter and dispatcher
         interpreter->setEventTrapSystem(dispatcher->getEventTrapSystem());
@@ -252,6 +277,28 @@ public:
         return setScreenMode(mode);
     }
     
+    // Public method to change colors (called by COLOR statement)
+    bool changeColor(int foreground, int background) {
+        bool changed = false;
+        
+        // Update foreground color if specified
+        if (foreground >= 0 && foreground <= 15) {
+            currentForeground = foreground;
+            changed = true;
+        }
+        
+        // Update background color if specified  
+        if (background >= 0 && background <= 7) {
+            currentBackground = background;
+            changed = true;
+        }
+        
+        // Apply the color change to subsequent text output
+        // The color change will take effect for new text printed
+        
+        return changed;
+    }
+    
     void run() {
         SDL_Event event;
         
@@ -348,7 +395,7 @@ private:
     void clearScreen() {
         for (int y = 0; y < rows && y < MAX_ROWS; y++) {
             for (int x = 0; x < cols && x < MAX_COLS; x++) {
-                screen[y][x] = {' ', WHITE, BLACK};
+                screen[y][x] = {' ', PALETTE[currentForeground], PALETTE[currentBackground]};
             }
         }
         cursorX = 0;
@@ -396,10 +443,10 @@ private:
         } else if (ch == '\b') {
             if (cursorX > 0) {
                 cursorX--;
-                screen[cursorY][cursorX] = {' ', WHITE, BLACK};
+                screen[cursorY][cursorX] = {' ', PALETTE[currentForeground], PALETTE[currentBackground]};
             }
         } else if (ch >= 32 && ch <= 126) {
-            screen[cursorY][cursorX] = {ch, WHITE, BLACK};
+            screen[cursorY][cursorX] = {ch, PALETTE[currentForeground], PALETTE[currentBackground]};
             cursorX++;
             if (cursorX >= cols) {
                 cursorX = 0;
@@ -420,7 +467,7 @@ private:
         }
         // Clear bottom line
         for (int x = 0; x < cols; x++) {
-            screen[rows - 1][x] = {' ', WHITE, BLACK};
+            screen[rows - 1][x] = {' ', PALETTE[currentForeground], PALETTE[currentBackground]};
         }
     }
     
@@ -1320,16 +1367,59 @@ void outputError(const std::string& message, std::function<void(const std::strin
 
 // Console-only mode for piped input
 int runConsoleMode(int argc, char* argv[]) {
+    // Console color state
+    int consoleForeground = 7;  // Default light gray
+    int consoleBackground = 0;  // Default black
+    
+    // ANSI color mapping for 16-color palette
+    auto getANSIColor = [](int color, bool background) -> std::string {
+        // Map GW-BASIC colors (0-15) to ANSI colors
+        int ansiColors[] = {0, 4, 2, 6, 1, 5, 3, 7, 8, 12, 10, 14, 9, 13, 11, 15};
+        if (color < 0 || color > 15) return "";
+        
+        int ansiColor = ansiColors[color];
+        if (background) {
+            return "\033[" + std::to_string(40 + (ansiColor & 7)) + "m";
+        } else {
+            if (ansiColor >= 8) {
+                return "\033[" + std::to_string(90 + (ansiColor - 8)) + "m"; // Bright colors
+            } else {
+                return "\033[" + std::to_string(30 + ansiColor) + "m";
+            }
+        }
+    };
+    
     // Initialize GW-BASIC components
     auto tokenizer = std::make_shared<Tokenizer>();
     auto programStore = std::make_shared<ProgramStore>();
     auto dispatcher = std::make_unique<BasicDispatcher>(tokenizer, programStore, 
-        [](const std::string& text) { std::cout << text; },  // print callback
+        [&](const std::string& text) { 
+            // Apply current console colors before printing
+            std::cout << getANSIColor(consoleForeground, false) 
+                      << getANSIColor(consoleBackground, true) 
+                      << text << "\033[0m"; // Reset colors after text
+        },  // print callback
         [](const std::string& prompt) -> std::string {       // input callback
             std::cout << prompt;
             std::string input;
             std::getline(std::cin, input);
             return input;
+        },
+        nullptr,  // screen mode callback (not supported in console mode)
+        [&](int foreground, int background) -> bool {         // color callback
+            // Update console colors and apply ANSI escape codes
+            if (foreground >= 0 && foreground <= 15) {
+                consoleForeground = foreground;
+            }
+            if (background >= 0 && background <= 7) {
+                consoleBackground = background;
+            }
+            
+            // Apply the color change immediately
+            std::cout << getANSIColor(consoleForeground, false) 
+                      << getANSIColor(consoleBackground, true);
+            
+            return true;
         });
     
     // Create InterpreterLoop for proper program execution
@@ -1483,6 +1573,9 @@ int runConsoleMode(int argc, char* argv[]) {
             }
         }
     }
+    
+    // Reset console colors before exiting
+    std::cout << "\033[0m";
     
     return 0;
 }
