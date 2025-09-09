@@ -88,7 +88,7 @@ public:
         tokenizer = std::make_shared<Tokenizer>();
         programStore = std::make_shared<ProgramStore>();
         interpreter = std::make_shared<InterpreterLoop>(programStore, tokenizer);
-        interpreter->setTrace(true);
+        interpreter->setTrace(false);
         interpreter->setTraceCallback([](uint16_t ln, const std::vector<uint8_t>& b){
             std::cerr << "TRACE " << ln << ": ";
             for (auto x : b) fprintf(stderr, "%02X ", x);
