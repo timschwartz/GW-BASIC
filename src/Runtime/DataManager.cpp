@@ -126,7 +126,7 @@ bool DataManager::findNextDataStatement() {
     while (it.isValid()) {
         const auto& tokens = it->tokens;
         
-        // Look for DATA token in this line
+    // Look for DATA token in this line
         for (size_t i = (it->lineNumber == dataPos.lineNumber ? dataPos.tokenIndex : 0); 
              i < tokens.size(); ++i) {
             
@@ -165,17 +165,16 @@ bool DataManager::parseNextValue(Value& result) {
     
     // Skip whitespace and commas
     skipWhitespace(tokens, pos);
-    
+    // Skip leading commas if sitting on one
+    if (pos < tokens.size() && (tokenIs(tokens, pos, ",") || tokens[pos] == ',')) {
+        ++pos;
+        skipWhitespace(tokens, pos);
+    }
+
     // Check if we're at end of statement or line
     if (isEndOfStatement(tokens, pos)) {
         // No more values in this DATA statement
         return false;
-    }
-    
-    // Skip comma if present
-    if (pos < tokens.size() && (tokens[pos] == ',' || tokens[pos] == 0xF5)) {
-        ++pos;
-        skipWhitespace(tokens, pos);
     }
     
     // Parse the value
@@ -207,14 +206,14 @@ void DataManager::skipToNextValue() {
     size_t pos = dataPos.tokenIndex;
     
     // Skip to next comma or end of statement
-    while (pos < tokens.size() && 
-           tokens[pos] != ',' && tokens[pos] != 0xF5 && // comma
-           tokens[pos] != ':' && tokens[pos] != 0x00) { // statement separator or end
+    while (pos < tokens.size() &&
+        !tokenIs(tokens, pos, ",") && tokens[pos] != ',' &&
+        !tokenIs(tokens, pos, ":") && tokens[pos] != 0x00) {
         ++pos;
     }
     
     // If we found a comma, move past it
-    if (pos < tokens.size() && (tokens[pos] == ',' || tokens[pos] == 0xF5)) {
+    if (pos < tokens.size() && (tokenIs(tokens, pos, ",") || tokens[pos] == ',')) {
         ++pos;
     }
     
@@ -234,6 +233,16 @@ bool DataManager::parseTokenValue(const std::vector<uint8_t>& tokens, size_t& po
     
     uint8_t token = tokens[pos];
     
+    // Handle optional tokenized sign before numeric constants
+    int sign = 1;
+    if (tokenIs(tokens, pos, "+") || tokenIs(tokens, pos, "-")) {
+        if (tokenIs(tokens, pos, "-")) sign = -1;
+        ++pos;
+        skipWhitespace(tokens, pos);
+        if (pos >= tokens.size()) return false;
+        token = tokens[pos];
+    }
+    
     // Handle different token types
     if (token == '"') {
         // String literal
@@ -248,19 +257,20 @@ bool DataManager::parseTokenValue(const std::vector<uint8_t>& tokens, size_t& po
             ++pos; // Skip closing quote
         }
         
-        // Create string value - for now we'll create a temporary StrDesc
-        // that will be properly allocated when assigned to a variable
-        StrDesc sd{};
-        sd.len = static_cast<uint16_t>(str.length());
-        sd.ptr = const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(str.c_str()));
+    // Hold data in a member buffer to ensure lifetime until assignment
+    tempStrBuffer = std::move(str);
+    StrDesc sd{};
+    sd.len = static_cast<uint16_t>(tempStrBuffer.length());
+    sd.ptr = reinterpret_cast<uint8_t*>(tempStrBuffer.data());
         result = Value::makeString(sd);
         return true;
         
     } else if (token == 0x11) {
         // Tokenized integer constant
         if (pos + 2 < tokens.size()) {
-            int16_t value = static_cast<int16_t>(tokens[pos + 1]) | 
-                           (static_cast<int16_t>(tokens[pos + 2]) << 8);
+        int16_t value = static_cast<int16_t>(tokens[pos + 1]) | 
+               (static_cast<int16_t>(tokens[pos + 2]) << 8);
+        value = static_cast<int16_t>(value * sign);
             pos += 3;
             result = Value::makeInt(value);
             return true;
@@ -280,7 +290,7 @@ bool DataManager::parseTokenValue(const std::vector<uint8_t>& tokens, size_t& po
             }
             
             pos += 5;
-            result = Value::makeSingle(conv.f);
+        result = Value::makeSingle(conv.f * static_cast<float>(sign));
             return true;
         }
         
@@ -298,7 +308,7 @@ bool DataManager::parseTokenValue(const std::vector<uint8_t>& tokens, size_t& po
             }
             
             pos += 9;
-            result = Value::makeDouble(conv.d);
+        result = Value::makeDouble(conv.d * static_cast<double>(sign));
             return true;
         }
         
@@ -306,11 +316,9 @@ bool DataManager::parseTokenValue(const std::vector<uint8_t>& tokens, size_t& po
         // ASCII numeric literal
         std::string numStr;
         
-        // Handle sign
-        if (token == '-' || token == '+') {
-            numStr += static_cast<char>(token);
-            ++pos;
-        }
+    // Handle sign from leading ASCII if present or from prior tokenized sign
+    if (sign < 0) numStr += '-';
+    if (token == '-' || token == '+') { numStr += static_cast<char>(token); ++pos; }
         
         // Collect digits and decimal point
         while (pos < tokens.size() && 
@@ -363,9 +371,10 @@ bool DataManager::parseTokenValue(const std::vector<uint8_t>& tokens, size_t& po
                 }
             } catch (...) {
                 // Parse error - return as string
-                StrDesc sd{};
-                sd.len = static_cast<uint16_t>(numStr.length());
-                sd.ptr = const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(numStr.c_str()));
+        tempStrBuffer = numStr;
+        StrDesc sd{};
+        sd.len = static_cast<uint16_t>(tempStrBuffer.length());
+        sd.ptr = reinterpret_cast<uint8_t*>(tempStrBuffer.data());
                 result = Value::makeString(sd);
                 return true;
             }
@@ -383,9 +392,10 @@ bool DataManager::parseTokenValue(const std::vector<uint8_t>& tokens, size_t& po
             str += static_cast<char>(tokens[pos++]);
         }
         
-        StrDesc sd{};
-        sd.len = static_cast<uint16_t>(str.length());
-        sd.ptr = const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(str.c_str()));
+    tempStrBuffer = std::move(str);
+    StrDesc sd{};
+    sd.len = static_cast<uint16_t>(tempStrBuffer.length());
+    sd.ptr = reinterpret_cast<uint8_t*>(tempStrBuffer.data());
         result = Value::makeString(sd);
         return true;
     }
@@ -396,9 +406,9 @@ bool DataManager::parseTokenValue(const std::vector<uint8_t>& tokens, size_t& po
 }
 
 bool DataManager::isEndOfStatement(const std::vector<uint8_t>& tokens, size_t pos) const {
-    return pos >= tokens.size() || 
-           tokens[pos] == 0x00 || // end of line
-           tokens[pos] == ':';    // statement separator
+    return pos >= tokens.size() ||
+           tokens[pos] == 0x00 ||
+           tokenIs(tokens, pos, ":") || tokens[pos] == ':';
 }
 
 void DataManager::skipWhitespace(const std::vector<uint8_t>& tokens, size_t& pos) const {
@@ -406,6 +416,16 @@ void DataManager::skipWhitespace(const std::vector<uint8_t>& tokens, size_t& pos
            (tokens[pos] == ' ' || tokens[pos] == '\t')) {
         ++pos;
     }
+}
+
+bool DataManager::tokenIs(const std::vector<uint8_t>& tokens, size_t pos, const char* symbol) const {
+    if (pos >= tokens.size() || symbol == nullptr || *symbol == '\0') return false;
+    // Match ASCII directly
+    if (tokens[pos] == static_cast<uint8_t>(symbol[0]) && symbol[1] == '\0') return true;
+    // Match tokenized form via tokenizer
+    if (!tok) return false;
+    std::string name = tok->getTokenName(tokens[pos]);
+    return name == symbol;
 }
 
 } // namespace gwbasic

@@ -292,6 +292,7 @@ private:
         if (name == "READ") return doREAD(b, pos);
         if (name == "DATA") return doDATA(b, pos);
         if (name == "RESTORE") return doRESTORE(b, pos);
+        if (name == "REM") return doREM(b, pos);
         if (name == "IF") return doIF(b, pos);
         if (name == "GOTO") return doGOTO(b, pos);
         if (name == "FOR") return doFOR(b, pos);
@@ -1533,7 +1534,7 @@ private:
             skipSpaces(b, pos);
             
             // Check for comma (more arrays)
-            if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) { // 0xF5 is tokenized comma
+            if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5 || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) { // 0xF5 is tokenized comma
                 ++pos; // consume comma
                 continue;
             }
@@ -2075,16 +2076,16 @@ private:
         // But we need to skip over the data values to avoid parsing them as statements
         
         // Skip over all data values until we reach end of line or statement separator
-        while (!atEnd(b, pos) && b[pos] != ':') {
+        while (!atEnd(b, pos) && !(b[pos] == ':' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ":"))) {
             // Skip whitespace
             while (!atEnd(b, pos) && (b[pos] == ' ' || b[pos] == '\t')) {
                 pos++;
             }
             
-            if (atEnd(b, pos) || b[pos] == ':') break;
+            if (atEnd(b, pos) || b[pos] == ':' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ":")) break;
             
             // Skip comma separator
-            if (b[pos] == ',' || b[pos] == 0xF5) {
+            if (b[pos] == ',' || b[pos] == 0xF5 || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ",")) {
                 pos++;
                 continue;
             }
@@ -2104,8 +2105,8 @@ private:
             } else if (token == 0x11) {
                 // Tokenized integer - skip 3 bytes total
                 pos += 3;
-            } else if (token == 0x1C) {
-                // Single precision float - skip 5 bytes total  
+            } else if (token == 0x1D) {
+                // Single precision float - skip 5 bytes total
                 pos += 5;
             } else if (token == 0x1F) {
                 // Double precision - skip 9 bytes total
@@ -2132,6 +2133,19 @@ private:
             // RESTORE with line number
             uint16_t lineNumber = readLineNumber(b, pos);
             dataManager.restore(lineNumber);
+        }
+        
+        return 0;
+    }
+    
+    // REM statement implementation
+    uint16_t doREM(const std::vector<uint8_t>& b, size_t& pos) {
+        // REM statement - skip everything to end of line or statement separator
+        // Everything after REM is a comment and should be ignored
+        
+        while (!atEnd(b, pos) && b[pos] != 0x00 && b[pos] != ':' && 
+               !(b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ":")) {
+            ++pos;
         }
         
         return 0;

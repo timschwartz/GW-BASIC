@@ -56,6 +56,10 @@ private:
         bool valid = false;         // Whether position is valid
     } dataPos;
     
+    // Temporary buffer to hold string data between readValue() and assignment.
+    // This ensures the pointer inside Value remains valid long enough to be copied.
+    std::string tempStrBuffer;
+
     // Find the next DATA statement starting from current position
     bool findNextDataStatement();
     
@@ -73,6 +77,9 @@ private:
     
     // Helper to skip whitespace tokens
     void skipWhitespace(const std::vector<uint8_t>& tokens, size_t& pos) const;
+
+    // Helper to check if the token at 'pos' matches a given symbol (e.g., ",", ":", ";", "+", "-")
+    bool tokenIs(const std::vector<uint8_t>& tokens, size_t pos, const char* symbol) const;
 };
 
 } // namespace gwbasic
