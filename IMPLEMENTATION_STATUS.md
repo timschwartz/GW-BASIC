@@ -84,6 +84,8 @@ This project - ✅ **SAVE**: Basic file I/O for program storage
 - Implemented function call parsing framework with argument list handling
 - Added support for both ASCII and tokenized function recognition
 - Enhanced floating-point number parsing in ASCII literals
+- Case-insensitive matching for built-in function names to avoid "Unknown function" due to case
+- Argument list parsing supports tokenized delimiters used in tokenized programs: '(' = 0xF3, ')' = 0xF4, ',' = 0xF5
 - **NEW**: Complete array element access implementation with A(I,J) and A[I,J] syntax support
 - **NEW**: Intelligent function vs array disambiguation using built-in function registry
 - **NEW**: Multi-dimensional array support with proper index expression evaluation
@@ -247,7 +249,7 @@ This project - ✅ **SAVE**: Basic file I/O for program storage
 - ✅ **StringManager Interface**: High-level string operations including creation, concatenation, slicing (LEFT$, RIGHT$, MID$), search (INSTR), and comparison
 - ✅ **Temporary String Management**: RAII-based temporary string pool with automatic cleanup
 - ✅ **String Functions**: LEN, MID$, LEFT$, RIGHT$, INSTR implemented in StringManager
-- ❌ **Missing**: CHR$, STR$, VAL functions in runtime integration
+ - 🧪 Additional functions available via ExpressionEvaluator built-ins: CHR$, STR$, VAL
 - ❌ **String Arrays**: Multi-dimensional string storage
 
 ### File I/O System (30% Complete)
@@ -348,7 +350,7 @@ Recent fixes:
 ## 🎯 Next Priority Items
 
 ### High Priority (Core Language Completion)
-1. **String Function Integration**: Integrate CHR$, STR$, VAL functions with runtime system
+1. **Argument List Tokenization Tests**: Add integration tests for tokenized delimiters 0xF3/0xF4/0xF5 in function calls
 2. **File I/O**: Sequential file operations (OPEN, CLOSE, INPUT#, PRINT#)
 3. **Error Handling Enhancement**: ON ERROR GOTO and RESUME statements
 
@@ -370,7 +372,7 @@ Recent fixes:
 
 ### Critical Issues
 - Limited error handling in expressions
-- Missing integration of string functions (CHR$, STR$, VAL) with runtime system
+- Ensure consistent handling of tokenized delimiters across expression contexts
 
 ### Important Issues  
 - No file I/O beyond LOAD/SAVE

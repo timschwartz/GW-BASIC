@@ -9,6 +9,7 @@
 #include <sstream>
 #include <random>
 #include <unordered_set>
+#include <iostream>
 
 #include "../Tokenizer/Tokenizer.hpp"
 #include "../NumericEngine/NumericEngine.hpp"
@@ -174,62 +175,83 @@ std::string ExpressionEvaluator::readIdentifier(const std::vector<uint8_t>& b, s
 
 std::vector<Value> ExpressionEvaluator::parseArgumentList(const std::vector<uint8_t>& b, size_t& pos, Env& env) {
     std::vector<Value> args;
-    
+
     // Expect opening parenthesis or square bracket
     skipSpaces(b, pos);
-    if (atEnd(b, pos) || (b[pos] != '(' && b[pos] != '[')) {
+
+    // Support tokenized '(' as 0xF3 (as used elsewhere in the interpreter)
+    auto isOpenParen = [&](uint8_t ch) { return ch == '(' || ch == '[' || ch == 0xF3; };
+    auto isCloseParen = [&](uint8_t expectedClose, uint8_t ch) {
+        // expectedClose will be ')' or ']' if ASCII was used
+        if (ch == expectedClose) return true;              // ASCII close
+        if (expectedClose == ')' && ch == 0xF4) return true; // tokenized ')'
+        // No tokenized ']' observed; treat only ASCII ']'
+        return false;
+    };
+
+    if (atEnd(b, pos) || !isOpenParen(b[pos])) {
         return args; // No arguments
     }
-    
-    char openChar = static_cast<char>(b[pos]);
-    char closeChar = (openChar == '(') ? ')' : ']';
-    ++pos; // consume opening character
+
+    // Determine closing delimiter
+    uint8_t closeChar;
+    if (b[pos] == '[') closeChar = ']';
+    else closeChar = ')'; // for '(' or tokenized '('
+
+    // consume opening character (ASCII '(' or '[') or tokenized '('
+    ++pos;
     skipSpaces(b, pos);
-    
+
     // Handle empty argument list
-    if (!atEnd(b, pos) && b[pos] == static_cast<uint8_t>(closeChar)) {
+    if (!atEnd(b, pos) && isCloseParen(closeChar, b[pos])) {
         ++pos; // consume closing character
         return args;
     }
-    
+
     // Parse arguments separated by commas
     while (!atEnd(b, pos)) {
         skipSpaces(b, pos);
         if (atEnd(b, pos)) {
-            throw BasicError(2, "Syntax error: missing closing " + std::string(1, closeChar), pos);
+            throw BasicError(2, "Syntax error: missing closing " + std::string(1, static_cast<char>(closeChar)), pos);
         }
-        
+
         // Check for closing character before parsing argument
-        if (b[pos] == static_cast<uint8_t>(closeChar)) {
+        if (isCloseParen(closeChar, b[pos])) {
             ++pos; // consume closing character
             break;
         }
-        
+
         auto arg = parseExpression(b, pos, env, 0);
         args.push_back(std::move(arg));
-        
+
         skipSpaces(b, pos);
         if (atEnd(b, pos)) {
-            throw BasicError(2, "Syntax error: missing closing " + std::string(1, closeChar), pos);
+            throw BasicError(2, "Syntax error: missing closing " + std::string(1, static_cast<char>(closeChar)), pos);
         }
-        
-        if (b[pos] == static_cast<uint8_t>(closeChar)) {
+
+        // Support tokenized comma 0xF5 as well as ASCII ','
+        if (isCloseParen(closeChar, b[pos])) {
             ++pos; // consume closing character
             break;
-        } else if (b[pos] == ',') {
+        } else if (b[pos] == ',' || b[pos] == 0xF5) {
             ++pos; // consume ','
             skipSpaces(b, pos);
         } else {
-            throw BasicError(2, "Syntax error: expected ',' or '" + std::string(1, closeChar) + "'", pos);
+            throw BasicError(2, "Syntax error: expected ',' or '" + std::string(1, static_cast<char>(closeChar)) + "'", pos);
         }
     }
-    
+
     return args;
 }
 
 Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, const std::vector<Value>& args, Env& env) {
-    // Math functions - direct implementations
-    if (funcName == "ABS" && args.size() == 1) {
+    // Convert function name to uppercase for comparison
+    std::string upperFuncName = funcName;
+    std::transform(upperFuncName.begin(), upperFuncName.end(), upperFuncName.begin(), 
+                   [](unsigned char c) { return std::toupper(c); });
+    
+    // Math functions
+    if (upperFuncName == "ABS" && args.size() == 1) {
         if (isNumeric(args[0])) {
             double val = toDouble(args[0]);
             return Double{std::abs(val)};
@@ -237,7 +259,7 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "SGN" && args.size() == 1) {
+    if (upperFuncName == "SGN" && args.size() == 1) {
         if (isNumeric(args[0])) {
             double val = toDouble(args[0]);
             int16_t result = (val > 0) ? 1 : (val < 0) ? -1 : 0;
@@ -246,7 +268,7 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "INT" && args.size() == 1) {
+    if (upperFuncName == "INT" && args.size() == 1) {
         if (isNumeric(args[0])) {
             double val = toDouble(args[0]);
             return Int16{static_cast<int16_t>(std::floor(val))};
@@ -254,7 +276,7 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "FIX" && args.size() == 1) {
+    if (upperFuncName == "FIX" && args.size() == 1) {
         if (isNumeric(args[0])) {
             double val = toDouble(args[0]);
             return Int16{static_cast<int16_t>(std::trunc(val))};
@@ -262,7 +284,7 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "SQR" && args.size() == 1) {
+    if (upperFuncName == "SQR" && args.size() == 1) {
         if (isNumeric(args[0])) {
             double val = toDouble(args[0]);
             if (val < 0) throw BasicError(5, "Illegal function call", 0);
@@ -271,7 +293,7 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "SIN" && args.size() == 1) {
+    if (upperFuncName == "SIN" && args.size() == 1) {
         if (isNumeric(args[0])) {
             double val = toDouble(args[0]);
             return Double{std::sin(val)};
@@ -279,7 +301,7 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "COS" && args.size() == 1) {
+    if (upperFuncName == "COS" && args.size() == 1) {
         if (isNumeric(args[0])) {
             double val = toDouble(args[0]);
             return Double{std::cos(val)};
@@ -287,7 +309,7 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "TAN" && args.size() == 1) {
+    if (upperFuncName == "TAN" && args.size() == 1) {
         if (isNumeric(args[0])) {
             double val = toDouble(args[0]);
             return Double{std::tan(val)};
@@ -295,7 +317,7 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "ATN" && args.size() == 1) {
+    if (upperFuncName == "ATN" && args.size() == 1) {
         if (isNumeric(args[0])) {
             double val = toDouble(args[0]);
             return Double{std::atan(val)};
@@ -303,7 +325,7 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "LOG" && args.size() == 1) {
+    if (upperFuncName == "LOG" && args.size() == 1) {
         if (isNumeric(args[0])) {
             double val = toDouble(args[0]);
             if (val <= 0) throw BasicError(5, "Illegal function call", 0);
@@ -312,7 +334,7 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "EXP" && args.size() == 1) {
+    if (upperFuncName == "EXP" && args.size() == 1) {
         if (isNumeric(args[0])) {
             double val = toDouble(args[0]);
             return Double{std::exp(val)};
@@ -320,7 +342,7 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "RND") {
+    if (upperFuncName == "RND") {
         // Simple fallback RND implementation
         static std::mt19937 gen(std::random_device{}());
         std::uniform_real_distribution<float> dist(0.0f, 1.0f);
@@ -328,14 +350,14 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
     }
     
     // String functions (basic implementations)
-    if (funcName == "LEN" && args.size() == 1) {
+    if (upperFuncName == "LEN" && args.size() == 1) {
         if (std::holds_alternative<Str>(args[0])) {
             return Int16{static_cast<int16_t>(std::get<Str>(args[0]).v.length())};
         }
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "ASC" && args.size() == 1) {
+    if (upperFuncName == "ASC" && args.size() == 1) {
         if (std::holds_alternative<Str>(args[0])) {
             const auto& str = std::get<Str>(args[0]).v;
             if (str.empty()) throw BasicError(5, "Illegal function call", 0);
@@ -344,7 +366,7 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "CHR$" && args.size() == 1) {
+    if (upperFuncName == "CHR$" && args.size() == 1) {
         if (isNumeric(args[0])) {
             int16_t code = toInt16(args[0]);
             if (code < 0 || code > 255) throw BasicError(5, "Illegal function call", 0);
@@ -353,7 +375,7 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "STR$" && args.size() == 1) {
+    if (upperFuncName == "STR$" && args.size() == 1) {
         if (isNumeric(args[0])) {
             std::ostringstream oss;
             std::visit([&oss](auto&& arg) {
@@ -369,7 +391,7 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "VAL" && args.size() == 1) {
+    if (upperFuncName == "VAL" && args.size() == 1) {
         if (std::holds_alternative<Str>(args[0])) {
             const auto& str = std::get<Str>(args[0]).v;
             try {
@@ -390,7 +412,7 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "LEFT$" && args.size() == 2) {
+    if (upperFuncName == "LEFT$" && args.size() == 2) {
         if (std::holds_alternative<Str>(args[0]) && isNumeric(args[1])) {
             const auto& str = std::get<Str>(args[0]).v;
             int16_t len = toInt16(args[1]);
@@ -401,7 +423,7 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "RIGHT$" && args.size() == 2) {
+    if (upperFuncName == "RIGHT$" && args.size() == 2) {
         if (std::holds_alternative<Str>(args[0]) && isNumeric(args[1])) {
             const auto& str = std::get<Str>(args[0]).v;
             int16_t len = toInt16(args[1]);
@@ -412,7 +434,7 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "MID$" && (args.size() == 2 || args.size() == 3)) {
+    if (upperFuncName == "MID$" && (args.size() == 2 || args.size() == 3)) {
         if (std::holds_alternative<Str>(args[0]) && isNumeric(args[1])) {
             const auto& str = std::get<Str>(args[0]).v;
             int16_t start = toInt16(args[1]) - 1; // GW-BASIC uses 1-based indexing
@@ -434,21 +456,21 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
     }
     
     // Type conversion functions
-    if (funcName == "CINT" && args.size() == 1) {
+    if (upperFuncName == "CINT" && args.size() == 1) {
         if (isNumeric(args[0])) {
             return Int16{toInt16(args[0])};
         }
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "CSNG" && args.size() == 1) {
+    if (upperFuncName == "CSNG" && args.size() == 1) {
         if (isNumeric(args[0])) {
             return Single{static_cast<float>(toDouble(args[0]))};
         }
         throw BasicError(13, "Type mismatch", 0);
     }
     
-    if (funcName == "CDBL" && args.size() == 1) {
+    if (upperFuncName == "CDBL" && args.size() == 1) {
         if (isNumeric(args[0])) {
             return Double{toDouble(args[0])};
         }

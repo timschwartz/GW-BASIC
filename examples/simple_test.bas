@@ -1,0 +1,3 @@
+10 PRINT "Simple test"
+20 PRINT 65
+30 PRINT "A"
