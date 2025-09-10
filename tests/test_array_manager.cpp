@@ -65,6 +65,47 @@ TEST_CASE("ArrayManager basic functionality", "[array]") {
         REQUIRE(result.s.len == 5);
     }
     
+    SECTION("Multi-dimensional string arrays") {
+        // Create 2D string array STR2D$(3,4)
+        std::vector<int16_t> dimensions2d = {3, 4};
+        REQUIRE(arrayManager.createArray("STR2D$", ScalarType::String, dimensions2d));
+        
+        // Set element STR2D$(1,2) = "Hello2D"
+        std::vector<int32_t> indices2d = {1, 2};
+        StrDesc desc2d;
+        stringHeap.allocCopy("Hello2D", desc2d);
+        Value value2d = Value::makeString(desc2d);
+        REQUIRE(arrayManager.setElement("STR2D$", indices2d, value2d));
+        
+        // Get element STR2D$(1,2)
+        Value result2d;
+        REQUIRE(arrayManager.getElement("STR2D$", indices2d, result2d));
+        REQUIRE(result2d.type == ScalarType::String);
+        REQUIRE(result2d.s.len == 7);
+        
+        // Create 3D string array STR3D$(2,3,2)
+        std::vector<int16_t> dimensions3d = {2, 3, 2};
+        REQUIRE(arrayManager.createArray("STR3D$", ScalarType::String, dimensions3d));
+        
+        // Set element STR3D$(1,2,1) = "Test3D"
+        std::vector<int32_t> indices3d = {1, 2, 1};
+        StrDesc desc3d;
+        stringHeap.allocCopy("Test3D", desc3d);
+        Value value3d = Value::makeString(desc3d);
+        REQUIRE(arrayManager.setElement("STR3D$", indices3d, value3d));
+        
+        // Get element STR3D$(1,2,1)
+        Value result3d;
+        REQUIRE(arrayManager.getElement("STR3D$", indices3d, result3d));
+        REQUIRE(result3d.type == ScalarType::String);
+        REQUIRE(result3d.s.len == 6);
+        
+        // Test bounds checking for multi-dimensional string arrays
+        std::vector<int32_t> badIndices = {5, 1};
+        Value badResult;
+        REQUIRE_FALSE(arrayManager.getElement("STR2D$", badIndices, badResult));
+    }
+    
     SECTION("Bounds checking") {
         // Create array D(3)
         std::vector<int16_t> dimensions = {3};
