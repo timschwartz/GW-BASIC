@@ -1,4 +1,4 @@
-AC_PREREQ([2.72])
+AC_PREREQ([2.69])
 AC_INIT([GW-BASIC-CPP], [0.1], [tim@metaverse.systems])
 AC_CONFIG_SRCDIR([src/Tokenizer/Tokenizer.cpp])
 AC_CONFIG_HEADERS([config.h])
