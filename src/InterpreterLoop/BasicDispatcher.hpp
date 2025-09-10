@@ -1700,40 +1700,27 @@ private:
             skipSpaces(b, pos);
             if (atEnd(b, pos) || b[pos] == ':' || b[pos] == 0x00) break;
             
-            // Check if we have an integer token (0x11) or ASCII digits
-            if (pos + 2 < b.size() && b[pos] == 0x11) {
-                // Integer token - read it
-                uint16_t lineNum = static_cast<uint16_t>(b[pos+1]) | (static_cast<uint16_t>(b[pos+2]) << 8);
+            // Check for comma separator first
+            if (b[pos] == ',' || b[pos] == 0xF5 || b[pos] == 0xF6) { // 0xF5/0xF6 are tokenized commas
+                ++pos; // consume comma and continue
+                continue;
+            }
+            
+            // Try to parse line number using readLineNumber which understands tokenized integers
+            try {
+                uint16_t lineNum = readLineNumber(b, pos);
                 lineNumbers.push_back(lineNum);
-                pos += 3;
-            } else if (pos < b.size() && b[pos] >= '0' && b[pos] <= '9') {
-                // ASCII digits
-                uint32_t v = 0;
-                while (pos < b.size() && b[pos] >= '0' && b[pos] <= '9') { 
-                    v = v*10 + (b[pos]-'0'); 
-                    ++pos; 
-                }
-                lineNumbers.push_back(static_cast<uint16_t>(v));
-            } else {
-                // Check for comma separator
-                if (b[pos] == ',' || b[pos] == 0xF5) { // 0xF5 is tokenized comma
-                    ++pos; // consume comma and continue
-                    continue;
-                } else {
-                    // End of line number list
-                    break;
-                }
+            } catch (...) {
+                // Not a valid line number - end of list
+                break;
             }
             
             skipSpaces(b, pos);
             
-            // Optional comma - if present, consume it
-            if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) {
+            // Optional comma - if present, consume it for next iteration
+            if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5 || b[pos] == 0xF6)) {
                 ++pos; // consume comma
-                continue;
             }
-            // If no comma, we might be at the end or there might be more integer tokens
-            // Continue the loop to check for more integer tokens
         }
         
         // If index is out of range (0 or negative, or beyond list), do nothing
