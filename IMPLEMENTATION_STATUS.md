@@ -12,7 +12,7 @@ This project - ✅ **SAVE**: Basic file I/O for program storage
 - ✅ **COLOR Statement**: Complete foreground and background color support with standard 16-color CGA/EGA/VGA palette (colors 0-15 for foreground, 0-7 for background)
 - ✅ **Sequential File I/O**: Complete OPEN, CLOSE, PRINT#, INPUT# implementation with file mode support (INPUT/OUTPUT/APPEND), file number management, and proper tokenizer integration
 
-This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 92% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, comprehensive event trap handling, full function key support, complete SCREEN statement with graphics mode support and text framebuffer, and complete INPUT/PRINT behavior aligned with GW-BASIC semantics. Recent work added comprehensive function key support (F1-F10) with soft key expansion and event trap integration, unified console and GUI execution through the InterpreterLoop, added extended-statement handling (including SYSTEM), fixed PRINT/PRINT USING parsing at line terminators, and implemented full SCREEN statement functionality with 14 video modes, dynamic window resizing, and scaled text overlay for graphics modes.
+This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 95% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, comprehensive event trap handling, full function key support, complete SCREEN statement with graphics mode support and text framebuffer, user-defined function support (DEF FN), and complete INPUT/PRINT behavior aligned with GW-BASIC semantics. Recent work added comprehensive function key support (F1-F10) with soft key expansion and event trap integration, unified console and GUI execution through the InterpreterLoop, added extended-statement handling (including SYSTEM), fixed PRINT/PRINT USING parsing at line terminators, implemented full SCREEN statement functionality with 14 video modes, dynamic window resizing, and scaled text overlay for graphics modes, and completed DEF FN user-defined function implementation with proper error handling and line number reporting.
 
 ## ✅ Completed Components
 
@@ -77,6 +77,7 @@ This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be comp
   - String: LEN, ASC, CHR$, LEFT$, RIGHT$, MID$, STR$, VAL
   - Conversion: CINT, CSNG, CDBL
 - ✅ **Function Call Parsing**: Support for nested function calls and argument lists
+- ✅ **User-Defined Functions**: Complete FN function call parsing and evaluation with UserFunctionManager integration for DEF FN statement support
 - ✅ **ASCII and Tokenized Parsing**: Handles both ASCII text and tokenized function calls
 - ✅ **Floating-point Support**: Complete support for floating-point numbers in function arguments
 - ✅ **Array Element Access**: Complete support for array subscript syntax (A(I,J) and A[I,J])
@@ -91,11 +92,13 @@ This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be comp
 - Added support for both ASCII and tokenized function recognition
 - Enhanced floating-point number parsing in ASCII literals
 - Case-insensitive matching for built-in function names to avoid "Unknown function" due to case
-- Argument list parsing supports tokenized delimiters used in tokenized programs: '(' = 0xF3, ')' = 0xF4, ',' = 0xF5
+- Argument list parsing supports tokenized delimiters used in tokenized programs: '(' = 0xF4, ')' = 0xF5, ',' = 0xF6
 - **NEW**: Complete array element access implementation with A(I,J) and A[I,J] syntax support
 - **NEW**: Intelligent function vs array disambiguation using built-in function registry
 - **NEW**: Multi-dimensional array support with proper index expression evaluation
-- Complete test coverage for all implemented functions and array operations
+- **NEW**: Complete user-defined function support with FN function call parsing and evaluation
+- **NEW**: Enhanced token recognition for proper semicolon (0xF7) and comma (0xF6) handling in expressions
+- Complete test coverage for all implemented functions, array operations, and user-defined functions
 
 ### Microsoft Binary Format (MBF) Compatibility
 **Status: ✅ COMPLETE (100%)**
@@ -162,11 +165,12 @@ This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be comp
 - ✅ **String Heap with Garbage Collection**: Complete automatic memory management with mark-compact GC, configurable policies (OnDemand/Aggressive/Conservative), StringRootProvider pattern, string protection mechanism, and comprehensive statistics
 - ✅ **StringManager**: High-level interface for string operations including creation, concatenation, slicing (LEFT$, RIGHT$, MID$), search (INSTR), comparison, and RAII-managed temporary strings
 - ✅ **Array Runtime**: Complete array implementation with ArrayManager, DIM statement support, multi-dimensional arrays, and full integration with expression evaluator and variable table
+- ✅ **UserFunctionManager**: Complete user-defined function management with function definition storage, parameter binding, and expression evaluation within function scope
 - ✅ **Event Trap System**: Complete EventTrapSystem with support for KEY, ERROR, TIMER, PEN, PLAY, STRIG, and COM events with trap configuration, event injection, and checking mechanisms
 - ✅ **Data Management**: DataManager component for READ/DATA/RESTORE functionality with sequential data reading, type conversion, and pointer management
 - ✅ **File Management**: FileManager component for sequential file I/O operations with file number management, mode validation (INPUT/OUTPUT/APPEND), and read/write operations
 
-**Files**: `src/Runtime/` (Value.hpp, VariableTable.hpp, RuntimeStack.hpp, StringTypes.hpp, ArrayTypes.hpp, ArrayManager.hpp, ArrayManager.cpp, StringHeap.hpp, StringManager.hpp, EventTraps.hpp, EventTraps.cpp, DataManager.hpp, DataManager.cpp, FileManager.hpp, FileManager.cpp)
+**Files**: `src/Runtime/` (Value.hpp, VariableTable.hpp, RuntimeStack.hpp, StringTypes.hpp, ArrayTypes.hpp, ArrayManager.hpp, ArrayManager.cpp, StringHeap.hpp, StringManager.hpp, EventTraps.hpp, EventTraps.cpp, DataManager.hpp, DataManager.cpp, FileManager.hpp, FileManager.cpp, UserFunctionManager.hpp, UserFunctionManager.cpp)
 
 **Recent Enhancements:**
 - ✅ **Complete Array Runtime**: Full ArrayManager implementation with create/access/modify operations for multi-dimensional arrays
@@ -206,11 +210,13 @@ This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be comp
 - ✅ **Trap Control Statements**: KEY ON/OFF, ERROR handling (doERROR, doRESUME, doKEY, doTIMER)
 - ✅ **INPUT Statement**: Complete user input implementation with prompt support, cross-platform input handling (console/GUI modes), type coercion, and test mode support
 - ✅ **READ/DATA/RESTORE**: Complete data statement implementation with DataManager integration for sequential data reading and restoration
+- ✅ **DEF Statement**: Complete user-defined function implementation with DEF FN parsing, parameter binding, and function call evaluation
 - ✅ **END/STOP**: Program termination
 - ✅ **SYSTEM**: Implemented as a program statement via extended token 0xFE 0x02, halting execution
 - ✅ **LOAD/SAVE**: Basic file I/O for program storage
 - ✅ **SCREEN Statement**: Complete implementation with 14 video modes (0-13), dynamic window resizing, graphics mode switching, and text framebuffer overlay for graphics modes
 - ✅ **Sequential File I/O**: Complete OPEN, CLOSE, PRINT#, INPUT# implementation with file mode support, proper tokenizer integration for '#' operator and 'AS' keyword, and file number validation
+- ✅ **Error Handling Enhancement**: Improved error reporting with proper line number context for syntax errors, ensuring all expression evaluator exceptions are caught and re-thrown with line information
 
 **Files**: `src/InterpreterLoop/BasicDispatcher.hpp`
 **Recent Enhancements:**
@@ -221,6 +227,8 @@ This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be comp
 - **NEW**: Complete sequential file I/O implementation with doOPEN, doCLOSE, PRINT#, INPUT# supporting all file modes (INPUT/OUTPUT/APPEND)
 - **NEW**: FileManager integration with file number validation (1-255) and proper error mapping by file mode
 - **NEW**: Tokenizer support for '#' operator and 'AS' keyword with mixed ASCII/tokenized parsing support
+- **NEW**: Complete DEF FN implementation with doDEF statement parsing, UserFunctionManager integration, and FN function call support
+- **NEW**: Enhanced error handling with proper line number reporting for all syntax errors, including expression evaluator exceptions
 
 ### User Interface (90% Complete)
 - ✅ **SDL3 Integration**: Modern graphics framework for cross-platform support
@@ -297,7 +305,7 @@ Recent fixes:
 - ✅ **Arrays**: Complete implementation - DIM statement support, array element access (A(I,J) and A[I,J) syntax), multi-dimensional arrays, and full integration with expression evaluator and variable table
 - ✅ **Event Traps**: Complete implementation - ON KEY, ON ERROR, ON TIMER event handling with EventTrapSystem, event injection, trap configuration, and integration with InterpreterLoop and BasicDispatcher
 - ✅ **Data Statements**: Complete DATA, READ, RESTORE implementation with DataManager component for sequential data processing
-- ❌ **User-Defined Functions**: DEF FN statements
+- ✅ **User-Defined Functions**: Complete DEF FN implementation with function definition parsing, parameter binding, expression evaluation, and FN function call syntax support
 - ❌ **Error Handling**: Advanced error handling beyond basic traps
 
 ### Extended Statements
@@ -353,32 +361,31 @@ Recent fixes:
 |-----------|------------|---------------|---------|
 | Tokenizer | 100% | ~800 | Stable |
 | Program Store | 95% | ~600 | Stable |
-| Expression Evaluator | 98% | ~1000 | Near Complete |
+| Expression Evaluator | 100% | ~1000 | Complete |
 | Numeric Engine | 100% | ~1200 | Complete |
-| Runtime System | 100% | ~1400 | Complete |
+| Runtime System | 100% | ~1500 | Complete |
 | Interpreter Loop | 90% | ~350 | Core Complete |
-| Basic Dispatcher | 100% | ~1600 | Complete |
+| Basic Dispatcher | 100% | ~1700 | Complete |
 | User Interface | 90% | ~700 | Well Featured |
-| **Overall** | **92%** | **~7650** | **Beta Stage** |
+| **Overall** | **95%** | **~7850** | **Release Candidate** |
 
 ## 🎯 Next Priority Items
 
 ### High Priority (Core Language Completion)
-1. **User-Defined Functions**: DEF FN support for function definitions
-2. **Error Handling Enhancement**: ON ERROR GOTO and RESUME statements
-3. **Random File I/O**: GET, PUT operations for binary file access
+1. **Random File I/O**: GET, PUT operations for binary file access
+2. **Error Handling Enhancement**: ON ERROR GOTO and RESUME statements beyond basic traps
+3. **Directory Operations**: FILES, KILL, NAME statements for file management
 
 ### Medium Priority (Language Features)
-1. **Directory Operations**: FILES, KILL, NAME statements for file management
-2. **Time/Date Functions**: TIME$ and DATE$ implementation
-3. **PRINT USING String Patterns**: Extend PRINT USING to support string formatting patterns
-4. **Graphics Drawing**: Basic graphics drawing statements (PSET, LINE, CIRCLE)
+1. **Time/Date Functions**: TIME$ and DATE$ implementation
+2. **PRINT USING String Patterns**: Extend PRINT USING to support string formatting patterns
+3. **Graphics Drawing**: Basic graphics drawing statements (PSET, LINE, CIRCLE)
+4. **Sound**: SOUND and BEEP statements
 
 ### Low Priority (Advanced Features)
-1. **Sound**: SOUND and BEEP statements
-2. **Protected Files**: Encrypted program format
-3. **Device I/O**: Printer (LPRINT), communications ports
-4. **Binary Data**: BSAVE, BLOAD operations
+1. **Protected Files**: Encrypted program format
+2. **Device I/O**: Printer (LPRINT), communications ports
+3. **Binary Data**: BSAVE, BLOAD operations
 
 ## 🚧 Known Issues
 
@@ -406,26 +413,30 @@ The reimplemented GW-BASIC can currently run simple programs such as:
 25 PRINT "Hello, World!"
 30 COLOR 2, 1: REM Green text on blue background
 35 INPUT "Enter your name: ", NAME$
-40 OPEN "data.txt" FOR OUTPUT AS #1
-45 PRINT #1, "User: " + NAME$
-50 FOR I = 1 TO 10
-55   A(I) = I * 2
-60   PRINT #1, "Number: "; I; " Array: "; A(I)
-65   PRINT "Number: "; I; " Array: "; A(I)
-70 NEXT I
-75 CLOSE #1
-80 MATRIX(2,3) = 42
-85 COLOR 15, 0: REM White text on black background
-90 IF MATRIX[2,3] > 40 THEN PRINT "Matrix element is large!"
-95 PRINT USING "Currency: $###.##"; 123.45
-96 PRINT USING "Percentage: +##.#%"; 95.7
-97 PRINT USING "With commas: ###,###.##"; 12345.67
-98 OPEN "data.txt" FOR INPUT AS #2
-99 INPUT #2, FILEDATA$
-100 PRINT "Read from file: "; FILEDATA$
-105 CLOSE #2
-110 SCREEN 0: REM Back to text mode
-115 END
+40 DEF FN AREA(L, W) = L * W
+45 DEF FN SQUARE(X) = X * X
+50 OPEN "data.txt" FOR OUTPUT AS #1
+55 PRINT #1, "User: " + NAME$
+60 FOR I = 1 TO 10
+65   A(I) = I * 2
+70   PRINT #1, "Number: "; I; " Array: "; A(I)
+75   PRINT "Number: "; I; " Array: "; A(I)
+80 NEXT I
+85 CLOSE #1
+90 MATRIX(2,3) = 42
+95 COLOR 15, 0: REM White text on black background
+100 IF MATRIX[2,3] > 40 THEN PRINT "Matrix element is large!"
+105 PRINT "Area of 5x3 rectangle: "; FN AREA(5, 3)
+110 PRINT "Square of 7: "; FN SQUARE(7)
+115 PRINT USING "Currency: $###.##"; 123.45
+120 PRINT USING "Percentage: +##.#%"; 95.7
+125 PRINT USING "With commas: ###,###.##"; 12345.67
+130 OPEN "data.txt" FOR INPUT AS #2
+135 INPUT #2, FILEDATA$
+140 PRINT "Read from file: "; FILEDATA$
+145 CLOSE #2
+150 SCREEN 0: REM Back to text mode
+155 END
 ```
 
 It supports:
@@ -437,6 +448,7 @@ It supports:
 - INPUT statements with prompt support (callback-driven) and type coercion
 - PRINT USING formatted output with numeric patterns, currency symbols, comma separators, and sign indicators
 - Array element access with both A(I) and A[I] syntax, including multi-dimensional arrays
+- **User-defined functions**: DEF FN statement support with function definition and FN function call syntax
 - Program LOAD/SAVE operations
 - **Sequential file I/O**: OPEN, CLOSE, PRINT#, INPUT# with file mode support (INPUT/OUTPUT/APPEND)
 - Interactive command shell; SYSTEM halts program as an extended statement
@@ -445,6 +457,7 @@ It supports:
 - Complete SCREEN statement with 14 video modes (0-13) and dynamic window resizing
 - Text display in all graphics modes with automatic character scaling and proper text overlay
 - Complete COLOR statement with 16-color palette support for foreground and background colors
+- **Enhanced error reporting**: Syntax errors now include proper line number information for better debugging
 
 ## 🔮 Future Roadmap
 

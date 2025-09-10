@@ -179,13 +179,24 @@ std::vector<Value> ExpressionEvaluator::parseArgumentList(const std::vector<uint
     // Expect opening parenthesis or square bracket
     skipSpaces(b, pos);
 
-    // Support tokenized '(' as 0xF3 (as used elsewhere in the interpreter)
-    auto isOpenParen = [&](uint8_t ch) { return ch == '(' || ch == '[' || ch == 0xF3; };
+    // Use tokenizer-aware detection for parentheses
+    auto isOpenParen = [&](uint8_t ch) { 
+        if (ch == '(' || ch == '[') return true;
+        if (ch >= 0x80 && tokenizer) {
+            std::string tokenName = tokenizer->getTokenName(ch);
+            return tokenName == "(" || tokenName == "[";
+        }
+        return false;
+    };
     auto isCloseParen = [&](uint8_t expectedClose, uint8_t ch) {
-        // expectedClose will be ')' or ']' if ASCII was used
-        if (ch == expectedClose) return true;              // ASCII close
-        if (expectedClose == ')' && ch == 0xF4) return true; // tokenized ')'
-        // No tokenized ']' observed; treat only ASCII ']'
+        // ASCII close
+        if (ch == expectedClose) return true;
+        // Tokenized close
+        if (ch >= 0x80 && tokenizer) {
+            std::string tokenName = tokenizer->getTokenName(ch);
+            if (expectedClose == ')' && tokenName == ")") return true;
+            if (expectedClose == ']' && tokenName == "]") return true;
+        }
         return false;
     };
 
@@ -196,6 +207,7 @@ std::vector<Value> ExpressionEvaluator::parseArgumentList(const std::vector<uint
     // Determine closing delimiter
     uint8_t closeChar;
     if (b[pos] == '[') closeChar = ']';
+    else if (b[pos] >= 0x80 && tokenizer && tokenizer->getTokenName(b[pos]) == "[") closeChar = ']';
     else closeChar = ')'; // for '(' or tokenized '('
 
     // consume opening character (ASCII '(' or '[') or tokenized '('
@@ -229,11 +241,11 @@ std::vector<Value> ExpressionEvaluator::parseArgumentList(const std::vector<uint
             throw BasicError(2, "Syntax error: missing closing " + std::string(1, static_cast<char>(closeChar)), pos);
         }
 
-        // Support tokenized comma 0xF5 as well as ASCII ','
+        // Use tokenizer-aware comma detection
         if (isCloseParen(closeChar, b[pos])) {
             ++pos; // consume closing character
             break;
-        } else if (b[pos] == ',' || b[pos] == 0xF5) {
+        } else if (b[pos] == ',' || (b[pos] >= 0x80 && tokenizer && tokenizer->getTokenName(b[pos]) == ",")) {
             ++pos; // consume ','
             skipSpaces(b, pos);
         } else {
@@ -676,11 +688,14 @@ Value ExpressionEvaluator::parsePrimary(const std::vector<uint8_t>& b, size_t& p
         }
     }
 
-    // Parenthesized expression
-    if (t == '(') {
+    // Parenthesized expression (ASCII or tokenized)
+    if (t == '(' || (t >= 0x80 && tokenizer && tokenizer->getTokenName(t) == "(")) {
         ++pos; // consume '('
         auto inner = parseExpression(b, pos, env, 0);
-        if (atEnd(b, pos) || b[pos] != ')') throw BasicError(2, "Syntax error: missing )", pos);
+        // Check for closing paren (ASCII or tokenized)
+        if (atEnd(b, pos) || !(b[pos] == ')' || (b[pos] >= 0x80 && tokenizer && tokenizer->getTokenName(b[pos]) == ")"))) {
+            throw BasicError(2, "Syntax error: missing )", pos);
+        }
         ++pos; // consume ')'
         return inner;
     }
@@ -689,6 +704,28 @@ Value ExpressionEvaluator::parsePrimary(const std::vector<uint8_t>& b, size_t& p
     std::string funcName;
     if (tryDecodeFunction(b, pos, funcName)) {
         pos += 2; // consume function token (0xFF + function code)
+        return parseFunction(funcName, b, pos, env);
+    }
+
+    // Check for FN calls (user-defined functions): FN FUNCNAME(args)
+    if ((t >= 0x80 && tokenizer && tokenizer->getTokenName(t) == "FN") ||
+        (t == 'F' && pos + 1 < b.size() && (b[pos + 1] == 'N' || b[pos + 1] == 'n'))) {
+        
+        // Skip FN token/word
+        if (t >= 0x80) {
+            ++pos; // tokenized FN
+        } else {
+            pos += 2; // ASCII "FN"
+        }
+        skipSpaces(b, pos);
+        
+        // Read function name
+        if (atEnd(b, pos) || !isAsciiAlpha(b[pos])) {
+            throw BasicError(2, "Syntax error: expected function name after FN", pos);
+        }
+        auto funcName = readIdentifier(b, pos);
+        
+        // Must be followed by parentheses for user function call
         return parseFunction(funcName, b, pos, env);
     }
 

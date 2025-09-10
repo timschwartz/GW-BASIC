@@ -1,0 +1,1 @@
+10 DEF FNSQUARE(X) = X * X

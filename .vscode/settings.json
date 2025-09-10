@@ -17,6 +17,7 @@
         "format": "cpp",
         "ostream": "cpp",
         "typeinfo": "cpp",
-        "text_encoding": "cpp"
+        "text_encoding": "cpp",
+        "sstream": "cpp"
     }
 }

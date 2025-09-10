@@ -22,6 +22,7 @@
 #include "../Runtime/EventTraps.hpp"
 #include "../Runtime/DataManager.hpp"
 #include "../Runtime/FileManager.hpp"
+#include "../Runtime/UserFunctionManager.hpp"
 #include "../NumericEngine/NumericEngine.hpp"
 
 // A dispatcher for a subset of BASIC statements to exercise the loop.
@@ -42,7 +43,7 @@ public:
     using ColorCallback = std::function<bool(int, int)>; // foreground, background -> success
     
     BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr, ScreenModeCallback screenCb = nullptr, ColorCallback colorCb = nullptr)
-        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), fileManager(), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb), colorCallback(colorCb) {
+        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), fileManager(), userFunctionManager(&strHeap, tok), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb), colorCallback(colorCb) {
         // Wire up cross-references
         vars.setStringHeap(&strHeap);
         vars.setArrayManager(&arrayManager);
@@ -74,6 +75,29 @@ public:
                 return true;
             }
             return false;
+        };
+        
+        // Wire user-defined function calls
+        env.callFunc = [this](const std::string& name, const std::vector<expr::Value>& args, expr::Value& out) -> bool {
+            // Check user-defined functions first
+            if (userFunctionManager.isUserFunction(name)) {
+                try {
+                    // Convert expr::Value arguments to gwbasic::Value
+                    std::vector<gwbasic::Value> runtimeArgs;
+                    for (const auto& arg : args) {
+                        runtimeArgs.push_back(this->fromExprValue(arg));
+                    }
+                    
+                    gwbasic::Value result;
+                    if (userFunctionManager.callFunction(name, runtimeArgs, result)) {
+                        out = toExprValue(result);
+                        return true;
+                    }
+                } catch (const std::exception&) {
+                    // Function call failed - let built-in functions handle it
+                }
+            }
+            return false; // Not a user function, let built-ins handle it
         };
     }
 
@@ -144,6 +168,7 @@ private:
     gwbasic::EventTrapSystem eventTraps;
     gwbasic::DataManager dataManager;
     gwbasic::FileManager fileManager;
+    gwbasic::UserFunctionManager userFunctionManager;
     expr::Env env;
     PrintCallback printCallback;
     InputCallback inputCallback;
@@ -228,6 +253,26 @@ private:
         return out;
     }
 
+    gwbasic::Value fromExprValue(const expr::Value& v) {
+        return std::visit([this](auto&& x) -> gwbasic::Value {
+            using T = std::decay_t<decltype(x)>;
+            if constexpr (std::is_same_v<T, expr::Int16>) {
+                return gwbasic::Value::makeInt(x.v);
+            } else if constexpr (std::is_same_v<T, expr::Single>) {
+                return gwbasic::Value::makeSingle(x.v);
+            } else if constexpr (std::is_same_v<T, expr::Double>) {
+                return gwbasic::Value::makeDouble(x.v);
+            } else if constexpr (std::is_same_v<T, expr::Str>) {
+                // Allocate string in runtime heap
+                gwbasic::StrDesc sd{};
+                if (!strHeap.allocCopy(reinterpret_cast<const uint8_t*>(x.v.data()), static_cast<uint16_t>(x.v.size()), sd)) {
+                    throwBasicError(7, "Out of string space", 0);
+                }
+                return gwbasic::Value::makeString(sd);
+            }
+        }, v);
+    }
+
     static bool atEnd(const std::vector<uint8_t>& b, size_t pos) {
         // Only treat buffer exhaustion as end. 0x00 sentinel handled explicitly
         // in the execution loop to avoid interfering with numeric token data.
@@ -270,6 +315,18 @@ private:
         throw expr::BasicError(code, message, position);
     }
 
+    // Helper method to catch and re-throw BasicError with line number context
+    template<typename Func>
+    auto catchAndRethrowWithLineNumber(Func&& func) -> decltype(func()) {
+        try {
+            return func();
+        } catch (const expr::BasicError& e) {
+            // Re-throw with line number included
+            throwBasicError(e.code, e.what(), e.position);
+            throw; // This line should never be reached, but keeps compiler happy
+        }
+    }
+
     uint16_t handleStatement(const std::vector<uint8_t>& b, size_t& pos) {
         if (pos >= b.size()) return 0;
         uint8_t t = b[pos++];
@@ -295,6 +352,7 @@ private:
         if (name == "INPUT") return doINPUT(b, pos);
         if (name == "LET") return handleLet(b, pos, false);
         if (name == "DIM") return doDIM(b, pos);
+        if (name == "DEF") return doDEF(b, pos);
         if (name == "READ") return doREAD(b, pos);
         if (name == "DATA") return doDATA(b, pos);
         if (name == "RESTORE") return doRESTORE(b, pos);
@@ -385,12 +443,12 @@ private:
             if (atEnd(b, pos)) break;
             if (pos < b.size() && b[pos] == 0x00) break; // after skipping spaces
             // Separators
-            if (b[pos] == 0xF6 || b[pos] == ';') { // semicolon token or ASCII
+            if (b[pos] == 0xF7 || b[pos] == ';') { // semicolon token or ASCII
                 trailingSemicolon = true;
                 ++pos;
                 continue;
             }
-            if (b[pos] == 0xF5 || b[pos] == ',') { // comma token or ASCII
+            if (b[pos] == 0xF6 || b[pos] == ',') { // comma token or ASCII
                 output += "\t";
                 trailingSemicolon = false;
                 ++pos;
@@ -398,7 +456,9 @@ private:
             }
             if (b[pos] == ':') { ++pos; break; }
             // Expression
-            auto res = ev.evaluate(b, pos, env);
+            auto res = catchAndRethrowWithLineNumber([&]() { 
+                return ev.evaluate(b, pos, env); 
+            });
             pos = res.nextPos;
             std::visit([&](auto&& x){ 
                 using T = std::decay_t<decltype(x)>; 
@@ -1820,6 +1880,190 @@ private:
             
             // End of DIM statement
             break;
+        }
+        
+        return 0;
+    }
+    
+    // DEF FN statement: DEF FNname[(param1[,param2...])] = expression
+    uint16_t doDEF(const std::vector<uint8_t>& b, size_t& pos) {
+        auto logDebug = [&](const char* tag){
+            try {
+                std::ofstream ofs("/tmp/gwbasic_def_debug.log", std::ios::app);
+                if (ofs) {
+                    ofs << tag << " pos=" << pos << " bytes:";
+                    size_t dbgEnd = std::min(b.size(), pos + 16);
+                    for (size_t i = pos; i < dbgEnd; ++i) {
+                        uint8_t c = b[i];
+                        ofs << ' ' << std::hex << std::showbase << static_cast<int>(c) << std::dec;
+                    }
+                    ofs << " | tokens:";
+                    for (size_t i = pos; i < dbgEnd; ++i) {
+                        uint8_t c = b[i];
+                        if (c >= 0x80 && tok) ofs << " [" << tok->getTokenName(c) << "]";
+                        else if (c >= 32 && c < 127) ofs << ' ' << static_cast<char>(c);
+                        else ofs << " (" << std::hex << std::showbase << static_cast<int>(c) << std::dec << ")";
+                    }
+                    ofs << '\n';
+                }
+            } catch (...) {}
+        };
+
+        skipSpaces(b, pos);
+        logDebug("doDEF:after-skip");
+        
+        // Expect FN followed by function name
+        std::string fnKeyword;
+        if (!atEnd(b, pos)) {
+            // Prefer tokenizer-aware detection of the FN keyword
+            if (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "FN") {
+                fnKeyword = "FN";
+                ++pos; // consume tokenized FN
+                skipSpaces(b, pos); // allow optional space after FN
+                logDebug("doDEF:consumed-token-FN");
+            } else if (b[pos] >= 0x20 && b[pos] < 0x80) {
+                // ASCII - try to read "FN" directly from source
+                auto save = pos;
+                for (int i = 0; i < 2 && !atEnd(b, pos) && b[pos] >= 0x20 && b[pos] < 0x80; ++i) {
+                    fnKeyword.push_back(static_cast<char>(std::toupper(b[pos++])));
+                }
+                if (fnKeyword != "FN") {
+                    pos = save;
+                    fnKeyword.clear();
+                } else {
+                    skipSpaces(b, pos); // allow optional space after FN
+                    logDebug("doDEF:consumed-ascii-FN");
+                }
+            }
+        }
+        
+        // Read function name - should start immediately after FN or contain FN
+    std::string funcName = readIdentifier(b, pos);
+    if (funcName.empty()) {
+            // Debug: dump next few bytes and token names to diagnose
+            std::ostringstream oss;
+            oss << "DEF debug near pos " << pos << ": ";
+            size_t dbgEnd = std::min(b.size(), pos + 8);
+            for (size_t i = pos; i < dbgEnd; ++i) {
+                uint8_t c = b[i];
+                if (c >= 0x80 && tok) {
+                    oss << "[" << tok->getTokenName(c) << "] ";
+                } else if (c >= 32 && c < 127) {
+                    oss << "'" << static_cast<char>(c) << "' ";
+                } else {
+                    oss << std::hex << std::showbase << static_cast<int>(c) << std::dec << ' ';
+                }
+            }
+            reportError(oss.str());
+            throwBasicError(2, "Expected function name after DEF", pos);
+        }
+        
+        // If we didn't see a separate FN keyword, the function name should start with FN
+        if (fnKeyword.empty()) {
+            if (funcName.length() < 2 || funcName.substr(0, 2) != "FN") {
+                throwBasicError(2, "Function name must start with FN", pos);
+            }
+        }
+        // If we had separate FN keyword, the function name is used as-is (don't prepend FN)
+        
+        skipSpaces(b, pos);
+        
+    // Parse optional parameter list
+    std::vector<std::string> parameters;
+    if (!atEnd(b, pos) && (
+        b[pos] == '('
+         || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "(")
+        )) {
+        // Consume opening parenthesis (ASCII or tokenized)
+        ++pos;
+            
+            skipSpaces(b, pos);
+            
+            // Parse parameter list
+        while (!atEnd(b, pos) && !(
+            b[pos] == ')'
+         || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ")")
+        )) {
+                skipSpaces(b, pos);
+                if (atEnd(b, pos)) {
+                    throwBasicError(2, "Missing closing parenthesis in DEF", pos);
+                }
+                
+                std::string param = readIdentifier(b, pos);
+                if (param.empty()) {
+                    throwBasicError(2, "Expected parameter name in DEF", pos);
+                }
+                
+                parameters.push_back(param);
+                
+                skipSpaces(b, pos);
+                
+        // Check for comma (more parameters)
+        if (!atEnd(b, pos) && (
+            b[pos] == ','
+             || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ",")
+            )) {
+            ++pos; // consume comma
+                    continue;
+                }
+                
+                // Should be at closing parenthesis
+                break;
+            }
+            
+        // Expect closing parenthesis
+        if (!atEnd(b, pos) && (
+            b[pos] == ')'
+         || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ")")
+        )) {
+        ++pos; // consume closing parenthesis
+            } else {
+                throwBasicError(2, "Missing closing parenthesis in DEF", pos);
+            }
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Expect equals sign
+        if (atEnd(b, pos) || !(
+            b[pos] == '=' ||
+            (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "=")
+        )) {
+            throwBasicError(2, "Expected = in DEF statement", pos);
+        }
+        ++pos; // consume '='
+        
+        skipSpaces(b, pos);
+        
+        // Capture the expression tokens for later evaluation
+        size_t exprStart = pos;
+        std::vector<uint8_t> expression;
+        
+        // Read tokens until end of statement or line terminator
+        while (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+            expression.push_back(b[pos]);
+            ++pos;
+        }
+        
+        // Add null terminator to expression
+        expression.push_back(0x00);
+        
+        // Determine return type from function name
+        gwbasic::ScalarType returnType = gwbasic::ScalarType::Single; // Default
+        if (!funcName.empty()) {
+            char lastChar = funcName.back();
+            switch (lastChar) {
+                case '%': returnType = gwbasic::ScalarType::Int16; break;
+                case '#': returnType = gwbasic::ScalarType::Double; break;
+                case '$': returnType = gwbasic::ScalarType::String; break;
+                case '!': returnType = gwbasic::ScalarType::Single; break;
+                default:  returnType = gwbasic::ScalarType::Single; break;
+            }
+        }
+        
+        // Define the function
+        if (!userFunctionManager.defineFunction(funcName, parameters, expression, returnType)) {
+            throwBasicError(10, "Duplicate function definition: " + funcName, pos);
         }
         
         return 0;

@@ -16,6 +16,8 @@ libruntime_la_SOURCES = \
     StringHeap.hpp \
     StringManager.hpp \
     StringTypes.hpp \
+    UserFunctionManager.cpp \
+    UserFunctionManager.hpp \
     Value.hpp \
     VariableTable.hpp
 
