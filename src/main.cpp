@@ -88,6 +88,9 @@ private:
     };
     std::vector<PixelData> pixelBuffer;
     
+    // Simple graphics buffer for drawing operations (8-bit color indices)
+    std::vector<uint8_t> graphicsBuffer;
+    
     // Cursor position
     int cursorX, cursorY;
     bool cursorVisible;
@@ -144,7 +147,8 @@ public:
             [this](const std::string& text) { print(text); },
             [this](const std::string& prompt) -> std::string { return getInput(prompt); },
             [this](int mode) -> bool { return changeScreenMode(mode); },
-            [this](int foreground, int background) -> bool { return changeColor(foreground, background); });
+            [this](int foreground, int background) -> bool { return changeColor(foreground, background); },
+            [this]() -> uint8_t* { return getGraphicsBuffer(); });
         
         // Connect event trap system between interpreter and dispatcher
         interpreter->setEventTrapSystem(dispatcher->getEventTrapSystem());
@@ -936,6 +940,24 @@ private:
     }
     
     void renderGraphics() {
+        // Convert graphics buffer (8-bit color indices) to pixel buffer (RGBA)
+        if (!graphicsBuffer.empty() && !pixelBuffer.empty() && 
+            graphicsBuffer.size() == pixelBuffer.size() &&
+            graphicsBuffer.size() >= static_cast<size_t>(screenWidth * screenHeight)) {
+            
+            for (size_t i = 0; i < graphicsBuffer.size(); i++) {
+                uint8_t colorIndex = graphicsBuffer[i];
+                if (colorIndex < 16) {
+                    // Convert from 16-color palette to RGBA
+                    pixelBuffer[i] = {PALETTE[colorIndex].r, PALETTE[colorIndex].g, 
+                                     PALETTE[colorIndex].b, PALETTE[colorIndex].a};
+                } else {
+                    // For 256-color modes, use a simplified conversion
+                    pixelBuffer[i] = {colorIndex, colorIndex, colorIndex, 255};
+                }
+            }
+        }
+        
         // Render pixel buffer directly
         if (!pixelBuffer.empty() && pixelBuffer.size() >= static_cast<size_t>(screenWidth * screenHeight)) {
             for (int y = 0; y < screenHeight; y++) {
@@ -1177,12 +1199,14 @@ private:
             try {
                 size_t bufferSize = screenWidth * screenHeight;
                 pixelBuffer.assign(bufferSize, {0, 0, 0, 255});
+                graphicsBuffer.assign(bufferSize, 0); // 8-bit color indices, initialize to black
             } catch (const std::exception& e) {
                 std::cerr << "Error allocating pixel buffer: " << e.what() << std::endl;
                 return false;
             }
         } else {
             pixelBuffer.clear();
+            graphicsBuffer.clear();
         }
         
         // Clear screen in new mode
@@ -1317,6 +1341,14 @@ private:
         return softKeys[keyIndex];
     }
     
+    // Get graphics buffer for drawing operations
+    uint8_t* getGraphicsBuffer() {
+        if (graphicsMode && !graphicsBuffer.empty()) {
+            return graphicsBuffer.data();
+        }
+        return nullptr;
+    }
+    
     // Display function keys on bottom line (like original GW-BASIC)
     void displayFunctionKeys() {
         if (!functionKeysEnabled || graphicsMode) {
@@ -1420,7 +1452,8 @@ int runConsoleMode(int argc, char* argv[]) {
                       << getANSIColor(consoleBackground, true);
             
             return true;
-        });
+        },
+        nullptr);  // graphics buffer callback (not supported in console mode)
     
     // Create InterpreterLoop for proper program execution
     auto interpreter = std::make_unique<InterpreterLoop>(programStore, tokenizer);

@@ -215,10 +215,11 @@ This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be comp
 - ✅ **SYSTEM**: Implemented as a program statement via extended token 0xFE 0x02, halting execution
 - ✅ **LOAD/SAVE**: Basic file I/O for program storage
 - ✅ **SCREEN Statement**: Complete implementation with 14 video modes (0-13), dynamic window resizing, graphics mode switching, and text framebuffer overlay for graphics modes
-- ✅ **Sequential File I/O**: Complete OPEN, CLOSE, PRINT#, INPUT# implementation with file mode support, proper tokenizer integration for '#' operator and 'AS' keyword, and file number validation
+- ✅ **Sequential File I/O**: Complete OPEN, CLOSE, PRINT#, INPUT# implementation with file mode support (INPUT/OUTPUT/APPEND), file number validation, and proper tokenizer integration for '#' operator and 'AS' keyword
+- ✅ **Graphics Drawing**: Complete PSET, LINE, CIRCLE implementation with coordinate parsing, color parameter support, proper tokenization handling for parentheses (244), commas (246), and minus operators (232), and integration with GraphicsContext API
 - ✅ **Error Handling Enhancement**: Improved error reporting with proper line number context for syntax errors, ensuring all expression evaluator exceptions are caught and re-thrown with line information
 
-**Files**: `src/InterpreterLoop/BasicDispatcher.hpp`
+**Files**: `src/InterpreterLoop/BasicDispatcher.hpp`, `src/Graphics/` (GraphicsContext.hpp, GraphicsContext.cpp)
 **Recent Enhancements:**
 - Added handling for extended-statement prefix 0xFE (e.g., SYSTEM, TIMER)
 - Fixed PRINT/PRINT USING to stop parsing at 0x00 end-of-line terminator
@@ -229,6 +230,7 @@ This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be comp
 - **NEW**: Tokenizer support for '#' operator and 'AS' keyword with mixed ASCII/tokenized parsing support
 - **NEW**: Complete DEF FN implementation with doDEF statement parsing, UserFunctionManager integration, and FN function call support
 - **NEW**: Enhanced error handling with proper line number reporting for all syntax errors, including expression evaluator exceptions
+- **NEW**: Complete graphics drawing implementation with doPSET, doLINE, doCIRCLE supporting coordinate parsing, color parameters, and proper token handling for parentheses (244), commas (246), closing parentheses (245), and minus operators (232)
 
 ### User Interface (90% Complete)
 - ✅ **SDL3 Integration**: Modern graphics framework for cross-platform support
@@ -291,12 +293,14 @@ Recent fixes:
 - Trailing semicolon suppresses newline; commas align to tab stops
 - INPUT prompts are emitted via callback only to avoid duplicate output
 
-### Graphics and Sound (35% Complete)
+### Graphics and Sound (70% Complete)
 - ✅ **SCREEN Statement**: Complete implementation with 14 video modes (0-13), dynamic window resizing, and proper graphics mode switching
 - ✅ **Text Framebuffer**: Scaled text overlay system for graphics modes with automatic character scaling based on resolution
 - ✅ **Graphics Infrastructure**: SDL3-based pixel buffer management with separate rendering paths for text and graphics modes
 - ✅ **COLOR Statement**: Complete implementation with foreground and background color support (0-15 foreground, 0-7 background) using standard CGA/EGA/VGA 16-color palette
-- ❌ **Graphics Drawing**: PSET, LINE, CIRCLE, GET, PUT statements
+- ✅ **Graphics Drawing**: Complete PSET, LINE, CIRCLE implementation with coordinate parsing, color support, and proper tokenization handling
+- ✅ **GraphicsContext**: Full graphics drawing API with Bresenham line algorithm, midpoint circle algorithm, and SDL3 pixel buffer integration
+- ❌ **Advanced Graphics**: GET, PUT statements for sprite/image manipulation
 - ❌ **Sound**: SOUND, PLAY, BEEP statements
 
 ## ❌ Not Implemented
@@ -375,12 +379,12 @@ Recent fixes:
 1. **Random File I/O**: GET, PUT operations for binary file access
 2. **Error Handling Enhancement**: ON ERROR GOTO and RESUME statements beyond basic traps
 3. **Directory Operations**: FILES, KILL, NAME statements for file management
+4. **Advanced Graphics**: GET, PUT operations for sprite/image manipulation
 
 ### Medium Priority (Language Features)
 1. **Time/Date Functions**: TIME$ and DATE$ implementation
 2. **PRINT USING String Patterns**: Extend PRINT USING to support string formatting patterns
-3. **Graphics Drawing**: Basic graphics drawing statements (PSET, LINE, CIRCLE)
-4. **Sound**: SOUND and BEEP statements
+3. **Sound**: SOUND and BEEP statements
 
 ### Low Priority (Advanced Features)
 1. **Protected Files**: Encrypted program format
@@ -421,6 +425,7 @@ The reimplemented GW-BASIC can currently run simple programs such as:
 65   A(I) = I * 2
 70   PRINT #1, "Number: "; I; " Array: "; A(I)
 75   PRINT "Number: "; I; " Array: "; A(I)
+76   PSET (I * 5, 50), I MOD 16: REM Draw colored pixels
 80 NEXT I
 85 CLOSE #1
 90 MATRIX(2,3) = 42
@@ -435,6 +440,8 @@ The reimplemented GW-BASIC can currently run simple programs such as:
 135 INPUT #2, FILEDATA$
 140 PRINT "Read from file: "; FILEDATA$
 145 CLOSE #2
+146 LINE (10, 10)-(100, 100), 14: REM Draw a line
+147 CIRCLE (160, 100), 50, 12: REM Draw a circle
 150 SCREEN 0: REM Back to text mode
 155 END
 ```
@@ -457,6 +464,7 @@ It supports:
 - Complete SCREEN statement with 14 video modes (0-13) and dynamic window resizing
 - Text display in all graphics modes with automatic character scaling and proper text overlay
 - Complete COLOR statement with 16-color palette support for foreground and background colors
+- **Graphics drawing**: PSET, LINE, CIRCLE statements with coordinate parsing, color support, and proper tokenization handling
 - **Enhanced error reporting**: Syntax errors now include proper line number information for better debugging
 
 ## 🔮 Future Roadmap
@@ -490,10 +498,10 @@ It supports:
 The project welcomes contributions in several areas:
 
 **High Impact Areas:**
-- User-defined functions (DEF FN) implementation
 - Random file I/O (GET, PUT operations)
 - Error handling enhancement (ON ERROR GOTO, RESUME)
-- Graphics drawing statements (PSET, LINE, CIRCLE)
+- Advanced graphics (GET, PUT for sprite manipulation)
+- Directory operations (FILES, KILL, NAME)
 
 **Medium Impact Areas:**
 - Directory operations (FILES, KILL, NAME)

@@ -24,6 +24,7 @@
 #include "../Runtime/FileManager.hpp"
 #include "../Runtime/UserFunctionManager.hpp"
 #include "../NumericEngine/NumericEngine.hpp"
+#include "../Graphics/GraphicsContext.hpp"
 
 // A dispatcher for a subset of BASIC statements to exercise the loop.
 // It supports:
@@ -41,9 +42,10 @@ public:
     using InputCallback = std::function<std::string(const std::string&)>; // prompt -> input
     using ScreenModeCallback = std::function<bool(int)>; // mode -> success
     using ColorCallback = std::function<bool(int, int)>; // foreground, background -> success
+    using GraphicsBufferCallback = std::function<uint8_t*()>; // get graphics pixel buffer
     
-    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr, ScreenModeCallback screenCb = nullptr, ColorCallback colorCb = nullptr)
-        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), fileManager(), userFunctionManager(&strHeap, tok), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb), colorCallback(colorCb) {
+    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr, ScreenModeCallback screenCb = nullptr, ColorCallback colorCb = nullptr, GraphicsBufferCallback graphicsBufCb = nullptr)
+        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), fileManager(), userFunctionManager(&strHeap, tok), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb), colorCallback(colorCb), graphicsBufferCallback(graphicsBufCb), graphics() {
         // Wire up cross-references
         vars.setStringHeap(&strHeap);
         vars.setArrayManager(&arrayManager);
@@ -174,8 +176,10 @@ private:
     InputCallback inputCallback;
     ScreenModeCallback screenModeCallback;
     ColorCallback colorCallback;
+    GraphicsBufferCallback graphicsBufferCallback;
     uint16_t currentLine = 0; // Current line number being executed
     bool testMode = false; // Set to true to avoid waiting for input in tests
+    GraphicsContext graphics; // Graphics drawing context
 
     // Helpers to convert between runtime Value and evaluator Value
     static expr::Value toExprValue(const gwbasic::Value& v) {
@@ -338,6 +342,12 @@ private:
             switch (idx) {
                 case 0x02: // SYSTEM
                     return 0xFFFF; // terminate program
+                case 0x07: // PUT
+                    return doPUT(b, pos);
+                case 0x08: // GET
+                    return doGET(b, pos);
+                case 0x10: // CIRCLE
+                    return doCIRCLE(b, pos);
                 case 0x13: // TIMER (extended statement)
                     return doTIMER(b, pos);
                 default:
@@ -374,6 +384,9 @@ private:
         if (name == "TIMER") return doTIMER(b, pos);
         if (name == "SCREEN") return doSCREEN(b, pos);
         if (name == "COLOR") return doCOLOR(b, pos);
+        if (name == "PSET") return doPSET(b, pos);
+        if (name == "PRESET") return doPRESET(b, pos);
+        if (name == "LINE") return doLINE(b, pos);
         return 0;
     }
 
@@ -2316,6 +2329,14 @@ private:
             return 0;
         }
         
+        // Initialize graphics context for the new mode
+        if (graphicsBufferCallback) {
+            uint8_t* buffer = graphicsBufferCallback();
+            if (buffer) {
+                graphics.setMode(mode, buffer);
+            }
+        }
+        
         // Report mode change success
         switch (mode) {
             case 0:
@@ -2453,12 +2474,27 @@ private:
         }
         
         if (!success && colorCallback) {
-            throwBasicError(5, "Illegal function call: Could not set colors", 0);
+            throwBasicError(5, "Illegal function call: Could not set color", 0);
             return 0;
         }
         
-        // Note: In original GW-BASIC, COLOR command doesn't print anything
-        // The color change is silent and takes effect immediately
+        // Update graphics context default color
+        if (foreground >= 0) {
+            graphics.setDefaultColor(static_cast<uint8_t>(foreground));
+        }
+        
+        // Report color change
+        if (printCallback) {
+            std::string message = "COLOR";
+            if (foreground >= 0) {
+                message += " " + std::to_string(foreground);
+            }
+            if (background >= 0) {
+                message += "," + std::to_string(background);
+            }
+            message += " - Active\n";
+            printCallback(message);
+        }
         
         return 0;
     }
@@ -3104,6 +3140,672 @@ private:
                     slot.scalar = gwbasic::Value::makeString(sd);
                 }
                 break;
+            }
+        }
+    }
+
+    // Graphics statement handlers
+    uint16_t doPSET(const std::vector<uint8_t>& b, size_t& pos) {
+        // PSET [STEP] (x,y) [,color]
+        skipSpaces(b, pos);
+        
+        // Check for optional STEP keyword
+        bool stepMode = false;
+        if (!atEnd(b, pos)) {
+            uint8_t t = b[pos];
+            if (t >= 0x80 && tok && tok->getTokenName(t) == "STEP") {
+                stepMode = true;
+                ++pos;
+                skipSpaces(b, pos);
+            }
+        }
+        
+        // Expect opening parenthesis (token 244)
+        if (atEnd(b, pos) || !(b[pos] == '(' || b[pos] == 244)) {
+            throwBasicError(2, "Expected ( in PSET statement", pos);
+        }
+        ++pos; // consume (
+        
+        skipSpaces(b, pos);
+        
+        // Parse x coordinate
+        auto xRes = ev.evaluate(b, pos, env);
+        pos = xRes.nextPos;
+        int x = expr::ExpressionEvaluator::toInt16(xRes.value);
+        
+        skipSpaces(b, pos);
+        
+        int y = 0; // declare y variable
+        
+        // Check if we have a comma (token 246)
+        if (!atEnd(b, pos) && b[pos] == 246) {
+            ++pos; // consume comma (token 246)
+            skipSpaces(b, pos);
+            
+            // Parse y coordinate
+            auto yRes = ev.evaluate(b, pos, env);
+            pos = yRes.nextPos;
+            y = expr::ExpressionEvaluator::toInt16(yRes.value);
+        } else {
+            throwBasicError(2, "Expected comma between coordinates in PSET", pos);
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Expect closing parenthesis (token 245)
+        if (atEnd(b, pos) || !(b[pos] == ')' || b[pos] == 245)) {
+            throwBasicError(2, "Expected ) in PSET statement", pos);
+        }
+        ++pos; // consume )
+        
+        skipSpaces(b, pos);
+        
+        // Optional color parameter
+        int color = -1; // -1 means use default
+        if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 246)) {
+            ++pos; // consume comma
+            skipSpaces(b, pos);
+            
+            if (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+                auto colorRes = ev.evaluate(b, pos, env);
+                pos = colorRes.nextPos;
+                color = expr::ExpressionEvaluator::toInt16(colorRes.value);
+                
+                if (color < 0 || color > 15) {
+                    throwBasicError(5, "Illegal function call: Invalid color", pos);
+                }
+            }
+        }
+        
+        // Initialize graphics context if needed
+        initializeGraphicsContext();
+        
+        // Execute PSET
+        if (!graphics.pset(x, y, color, stepMode)) {
+            // PSET failure is typically not an error in GW-BASIC
+        }
+        
+        return 0;
+    }
+    
+    uint16_t doPRESET(const std::vector<uint8_t>& b, size_t& pos) {
+        // PRESET is PSET with color 0 (background)
+        // Parse like PSET but force color to 0
+        skipSpaces(b, pos);
+        
+        // Check for optional STEP keyword
+        bool stepMode = false;
+        if (!atEnd(b, pos)) {
+            uint8_t t = b[pos];
+            if (t >= 0x80 && tok && tok->getTokenName(t) == "STEP") {
+                stepMode = true;
+                ++pos;
+                skipSpaces(b, pos);
+            }
+        }
+        
+        // Expect opening parenthesis
+        if (atEnd(b, pos) || !(b[pos] == '(')) {
+            throwBasicError(2, "Expected ( in PRESET statement", pos);
+        }
+        ++pos; // consume (
+        
+        skipSpaces(b, pos);
+        
+        // Parse x coordinate
+        auto xRes = ev.evaluate(b, pos, env);
+        pos = xRes.nextPos;
+        int x = expr::ExpressionEvaluator::toInt16(xRes.value);
+        
+        skipSpaces(b, pos);
+        
+        // Expect comma
+        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 0xF5)) {
+            throwBasicError(2, "Expected comma in PRESET coordinates", pos);
+        }
+        ++pos; // consume comma
+        
+        skipSpaces(b, pos);
+        
+        // Parse y coordinate
+        auto yRes = ev.evaluate(b, pos, env);
+        pos = yRes.nextPos;
+        int y = expr::ExpressionEvaluator::toInt16(yRes.value);
+        
+        skipSpaces(b, pos);
+        
+        // Expect closing parenthesis
+        if (atEnd(b, pos) || !(b[pos] == ')' || b[pos] == 0xF4)) {
+            throwBasicError(2, "Expected ) in PRESET statement", pos);
+        }
+        ++pos; // consume )
+        
+        // Initialize graphics context if needed
+        initializeGraphicsContext();
+        
+        // Execute PRESET (always color 0)
+        if (!graphics.pset(x, y, 0, stepMode)) {
+            // PRESET failure is typically not an error in GW-BASIC
+        }
+        
+        return 0;
+    }
+    
+    uint16_t doLINE(const std::vector<uint8_t>& b, size_t& pos) {
+        // LINE [STEP] [(x1,y1)]-(x2,y2) [,color] [,[B][F]]
+        skipSpaces(b, pos);
+        
+        // Check for optional STEP keyword
+        bool stepMode = false;
+        if (!atEnd(b, pos)) {
+            uint8_t t = b[pos];
+            if (t >= 0x80 && tok && tok->getTokenName(t) == "STEP") {
+                stepMode = true;
+                ++pos;
+                skipSpaces(b, pos);
+            }
+        }
+        
+        bool hasStartPoint = true;
+        int x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+        
+        // Check if starts with - (no start point)
+        if (!atEnd(b, pos) && b[pos] == '-') {
+            hasStartPoint = false;
+            ++pos; // consume -
+        } else if (!atEnd(b, pos) && (b[pos] == '(' || b[pos] == 244)) {
+            // Parse start point
+            ++pos; // consume (
+            skipSpaces(b, pos);
+            
+            auto xRes = ev.evaluate(b, pos, env);
+            pos = xRes.nextPos;
+            x1 = expr::ExpressionEvaluator::toInt16(xRes.value);
+            
+            skipSpaces(b, pos);
+            
+            if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 246)) {
+                throwBasicError(2, "Expected comma in LINE start coordinates", pos);
+            }
+            ++pos; // consume comma
+            
+            skipSpaces(b, pos);
+            
+            auto yRes = ev.evaluate(b, pos, env);
+            pos = yRes.nextPos;
+            y1 = expr::ExpressionEvaluator::toInt16(yRes.value);
+            
+            skipSpaces(b, pos);
+            
+            if (atEnd(b, pos) || !(b[pos] == ')' || b[pos] == 245)) {
+                throwBasicError(2, "Expected ) in LINE start coordinates", pos);
+            }
+            ++pos; // consume )
+            
+            skipSpaces(b, pos);
+            
+            // Expect - after start point (regular or tokenized)
+            if (atEnd(b, pos) || (b[pos] != '-' && b[pos] != 232)) {  // 232 is tokenized minus
+                throwBasicError(2, "Expected - after start point in LINE", pos);
+            }
+            ++pos; // consume -
+        } else {
+            throwBasicError(2, "Expected coordinates or - in LINE statement", pos);
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Parse end point
+        if (atEnd(b, pos) || !(b[pos] == '(' || b[pos] == 244)) {
+            throwBasicError(2, "Expected ( for end coordinates in LINE", pos);
+        }
+        ++pos; // consume (
+        
+        skipSpaces(b, pos);
+        
+        auto x2Res = ev.evaluate(b, pos, env);
+        pos = x2Res.nextPos;
+        x2 = expr::ExpressionEvaluator::toInt16(x2Res.value);
+        
+        skipSpaces(b, pos);
+        
+        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 246)) {
+            throwBasicError(2, "Expected comma in LINE end coordinates", pos);
+        }
+        ++pos; // consume comma
+        
+        skipSpaces(b, pos);
+        
+        auto y2Res = ev.evaluate(b, pos, env);
+        pos = y2Res.nextPos;
+        y2 = expr::ExpressionEvaluator::toInt16(y2Res.value);
+        
+        skipSpaces(b, pos);
+        
+        if (atEnd(b, pos) || !(b[pos] == ')' || b[pos] == 245)) {
+            throwBasicError(2, "Expected ) in LINE end coordinates", pos);
+        }
+        ++pos; // consume )
+        
+        skipSpaces(b, pos);
+        
+        // Optional color parameter
+        int color = -1;
+        if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 246)) {
+            ++pos; // consume comma
+            skipSpaces(b, pos);
+            
+            if (!atEnd(b, pos) && b[pos] != ',' && b[pos] != 0xF5 && b[pos] != ':' && b[pos] != 0x00) {
+                auto colorRes = ev.evaluate(b, pos, env);
+                pos = colorRes.nextPos;
+                color = expr::ExpressionEvaluator::toInt16(colorRes.value);
+                
+                if (color < 0 || color > 15) {
+                    throwBasicError(5, "Illegal function call: Invalid color", pos);
+                }
+            }
+            
+            skipSpaces(b, pos);
+        }
+        
+        // Optional box flags (B, BF)
+        bool isBox = false;
+        bool isFilled = false;
+        if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) {
+            ++pos; // consume comma
+            skipSpaces(b, pos);
+            
+            // Parse B or BF flags
+            if (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+                if (b[pos] == 'B' || b[pos] == 'b') {
+                    isBox = true;
+                    ++pos;
+                    
+                    // Check for F after B
+                    if (!atEnd(b, pos) && (b[pos] == 'F' || b[pos] == 'f')) {
+                        isFilled = true;
+                        ++pos;
+                    }
+                }
+            }
+        }
+        
+        // Initialize graphics context if needed
+        initializeGraphicsContext();
+        
+        // Execute LINE
+        if (isBox) {
+            // Draw rectangle
+            if (!graphics.rectangle(x1, y1, x2, y2, color, isFilled, stepMode)) {
+                // Rectangle failure is typically not an error
+            }
+        } else {
+            // Draw line
+            if (hasStartPoint) {
+                if (!graphics.line(x1, y1, x2, y2, color, stepMode, stepMode)) {
+                    // Line failure is typically not an error
+                }
+            } else {
+                if (!graphics.lineToLastPoint(x2, y2, color, stepMode)) {
+                    // Line failure is typically not an error
+                }
+            }
+        }
+        
+        return 0;
+    }
+    
+    uint16_t doCIRCLE(const std::vector<uint8_t>& b, size_t& pos) {
+        // CIRCLE [STEP] (x,y), radius [,color]
+        skipSpaces(b, pos);
+        
+        // Check for optional STEP keyword
+        bool stepMode = false;
+        if (!atEnd(b, pos)) {
+            uint8_t t = b[pos];
+            if (t >= 0x80 && tok && tok->getTokenName(t) == "STEP") {
+                stepMode = true;
+                ++pos;
+                skipSpaces(b, pos);
+            }
+        }
+        
+        // Expect opening parenthesis
+        if (atEnd(b, pos) || !(b[pos] == '(' || b[pos] == 244)) {
+            throwBasicError(2, "Expected ( in CIRCLE statement", pos);
+        }
+        ++pos; // consume (
+        
+        skipSpaces(b, pos);
+        
+        // Parse center x coordinate
+        auto xRes = ev.evaluate(b, pos, env);
+        pos = xRes.nextPos;
+        int x = expr::ExpressionEvaluator::toInt16(xRes.value);
+        
+        skipSpaces(b, pos);
+        
+        // Expect comma
+        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 246)) {
+            throwBasicError(2, "Expected comma in CIRCLE center coordinates", pos);
+        }
+        ++pos; // consume comma
+        
+        skipSpaces(b, pos);
+        
+        // Parse center y coordinate
+        auto yRes = ev.evaluate(b, pos, env);
+        pos = yRes.nextPos;
+        int y = expr::ExpressionEvaluator::toInt16(yRes.value);
+        
+        skipSpaces(b, pos);
+        
+        // Expect closing parenthesis
+        if (atEnd(b, pos) || !(b[pos] == ')' || b[pos] == 245)) {
+            throwBasicError(2, "Expected ) in CIRCLE center coordinates", pos);
+        }
+        ++pos; // consume )
+        
+        skipSpaces(b, pos);
+        
+        // Expect comma before radius
+        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 246)) {
+            throwBasicError(2, "Expected comma before radius in CIRCLE", pos);
+        }
+        ++pos; // consume comma
+        
+        skipSpaces(b, pos);
+        
+        // Parse radius
+        auto radiusRes = ev.evaluate(b, pos, env);
+        pos = radiusRes.nextPos;
+        int radius = expr::ExpressionEvaluator::toInt16(radiusRes.value);
+        
+        if (radius < 0) {
+            throwBasicError(5, "Illegal function call: Negative radius", pos);
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Optional color parameter
+        int color = -1;
+        if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 246)) {
+            ++pos; // consume comma
+            skipSpaces(b, pos);
+            
+            if (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+                auto colorRes = ev.evaluate(b, pos, env);
+                pos = colorRes.nextPos;
+                color = expr::ExpressionEvaluator::toInt16(colorRes.value);
+                
+                if (color < 0 || color > 15) {
+                    throwBasicError(5, "Illegal function call: Invalid color", pos);
+                }
+            }
+        }
+        
+        // Initialize graphics context if needed
+        initializeGraphicsContext();
+        
+        // Execute CIRCLE
+        if (!graphics.circle(x, y, radius, color, stepMode)) {
+            // Circle failure is typically not an error
+        }
+        
+        return 0;
+    }
+    
+    uint16_t doGET(const std::vector<uint8_t>& b, size_t& pos) {
+        // GET [STEP] (x1,y1)-(x2,y2), arrayvar
+        skipSpaces(b, pos);
+        
+        // Check for optional STEP keyword
+        bool stepMode = false;
+        if (!atEnd(b, pos)) {
+            uint8_t t = b[pos];
+            if (t >= 0x80 && tok && tok->getTokenName(t) == "STEP") {
+                stepMode = true;
+                ++pos;
+                skipSpaces(b, pos);
+            }
+        }
+        
+        // Parse first corner
+        if (atEnd(b, pos) || !(b[pos] == '(' || b[pos] == 0xF3)) {
+            throwBasicError(2, "Expected ( in GET statement", pos);
+        }
+        ++pos; // consume (
+        
+        skipSpaces(b, pos);
+        
+        auto x1Res = ev.evaluate(b, pos, env);
+        pos = x1Res.nextPos;
+        int x1 = expr::ExpressionEvaluator::toInt16(x1Res.value);
+        
+        skipSpaces(b, pos);
+        
+        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 0xF5)) {
+            throwBasicError(2, "Expected comma in GET coordinates", pos);
+        }
+        ++pos; // consume comma
+        
+        skipSpaces(b, pos);
+        
+        auto y1Res = ev.evaluate(b, pos, env);
+        pos = y1Res.nextPos;
+        int y1 = expr::ExpressionEvaluator::toInt16(y1Res.value);
+        
+        skipSpaces(b, pos);
+        
+        if (atEnd(b, pos) || !(b[pos] == ')' || b[pos] == 0xF4)) {
+            throwBasicError(2, "Expected ) in GET coordinates", pos);
+        }
+        ++pos; // consume )
+        
+        skipSpaces(b, pos);
+        
+        // Expect -
+        if (atEnd(b, pos) || b[pos] != '-') {
+            throwBasicError(2, "Expected - in GET statement", pos);
+        }
+        ++pos; // consume -
+        
+        skipSpaces(b, pos);
+        
+        // Parse second corner
+        if (atEnd(b, pos) || !(b[pos] == '(' || b[pos] == 0xF3)) {
+            throwBasicError(2, "Expected ( for second corner in GET", pos);
+        }
+        ++pos; // consume (
+        
+        skipSpaces(b, pos);
+        
+        auto x2Res = ev.evaluate(b, pos, env);
+        pos = x2Res.nextPos;
+        int x2 = expr::ExpressionEvaluator::toInt16(x2Res.value);
+        
+        skipSpaces(b, pos);
+        
+        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 0xF5)) {
+            throwBasicError(2, "Expected comma in GET second coordinates", pos);
+        }
+        ++pos; // consume comma
+        
+        skipSpaces(b, pos);
+        
+        auto y2Res = ev.evaluate(b, pos, env);
+        pos = y2Res.nextPos;
+        int y2 = expr::ExpressionEvaluator::toInt16(y2Res.value);
+        
+        skipSpaces(b, pos);
+        
+        if (atEnd(b, pos) || !(b[pos] == ')' || b[pos] == 0xF4)) {
+            throwBasicError(2, "Expected ) in GET second coordinates", pos);
+        }
+        ++pos; // consume )
+        
+        skipSpaces(b, pos);
+        
+        // Expect comma before array variable
+        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 0xF5)) {
+            throwBasicError(2, "Expected comma before array in GET", pos);
+        }
+        ++pos; // consume comma
+        
+        skipSpaces(b, pos);
+        
+        // Parse array variable name
+        std::string arrayName = readIdentifier(b, pos);
+        if (arrayName.empty()) {
+            throwBasicError(2, "Expected array variable name in GET", pos);
+        }
+        
+        // Initialize graphics context if needed
+        initializeGraphicsContext();
+        
+        // Get pixel data
+        std::vector<uint8_t> pixelData;
+        if (!graphics.getBlock(x1, y1, x2, y2, pixelData, stepMode)) {
+            throwBasicError(5, "Illegal function call in GET", pos);
+        }
+        
+        // Store in array - for now, create a simple 1D array
+        // In a full implementation, we'd need to handle the specific GW-BASIC format
+        std::vector<int16_t> dimensions = {static_cast<int16_t>(pixelData.size())};
+        
+        if (!vars.createArray(arrayName, gwbasic::ScalarType::Int16, dimensions)) {
+            // Array might already exist - try to resize or use existing
+        }
+        
+        // Store pixel data in array
+        for (size_t i = 0; i < pixelData.size(); i++) {
+            std::vector<int32_t> indices = {static_cast<int32_t>(i)};
+            gwbasic::Value value = gwbasic::Value::makeInt(static_cast<int16_t>(pixelData[i]));
+            vars.setArrayElement(arrayName, indices, value);
+        }
+        
+        return 0;
+    }
+    
+    uint16_t doPUT(const std::vector<uint8_t>& b, size_t& pos) {
+        // PUT [STEP] (x,y), arrayvar [,actionverb]
+        skipSpaces(b, pos);
+        
+        // Check for optional STEP keyword
+        bool stepMode = false;
+        if (!atEnd(b, pos)) {
+            uint8_t t = b[pos];
+            if (t >= 0x80 && tok && tok->getTokenName(t) == "STEP") {
+                stepMode = true;
+                ++pos;
+                skipSpaces(b, pos);
+            }
+        }
+        
+        // Parse position
+        if (atEnd(b, pos) || !(b[pos] == '(' || b[pos] == 0xF3)) {
+            throwBasicError(2, "Expected ( in PUT statement", pos);
+        }
+        ++pos; // consume (
+        
+        skipSpaces(b, pos);
+        
+        auto xRes = ev.evaluate(b, pos, env);
+        pos = xRes.nextPos;
+        int x = expr::ExpressionEvaluator::toInt16(xRes.value);
+        
+        skipSpaces(b, pos);
+        
+        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 0xF5)) {
+            throwBasicError(2, "Expected comma in PUT coordinates", pos);
+        }
+        ++pos; // consume comma
+        
+        skipSpaces(b, pos);
+        
+        auto yRes = ev.evaluate(b, pos, env);
+        pos = yRes.nextPos;
+        int y = expr::ExpressionEvaluator::toInt16(yRes.value);
+        
+        skipSpaces(b, pos);
+        
+        if (atEnd(b, pos) || !(b[pos] == ')' || b[pos] == 0xF4)) {
+            throwBasicError(2, "Expected ) in PUT coordinates", pos);
+        }
+        ++pos; // consume )
+        
+        skipSpaces(b, pos);
+        
+        // Expect comma before array variable
+        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 0xF5)) {
+            throwBasicError(2, "Expected comma before array in PUT", pos);
+        }
+        ++pos; // consume comma
+        
+        skipSpaces(b, pos);
+        
+        // Parse array variable name
+        std::string arrayName = readIdentifier(b, pos);
+        if (arrayName.empty()) {
+            throwBasicError(2, "Expected array variable name in PUT", pos);
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Optional action verb (PSET, PRESET, AND, OR, XOR)
+        std::string mode = "PSET"; // default mode
+        if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) {
+            ++pos; // consume comma
+            skipSpaces(b, pos);
+            
+            if (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+                std::string actionWord;
+                while (!atEnd(b, pos) && std::isalpha(b[pos])) {
+                    actionWord.push_back(static_cast<char>(std::toupper(b[pos++])));
+                }
+                
+                if (actionWord == "PSET" || actionWord == "PRESET" || 
+                    actionWord == "AND" || actionWord == "OR" || actionWord == "XOR") {
+                    mode = actionWord;
+                }
+            }
+        }
+        
+        // Get pixel data from array
+        std::vector<uint8_t> pixelData;
+        
+        // For now, assume the array contains the raw pixel data
+        // In a full implementation, we'd need to decode the GW-BASIC format
+        auto* arraySlot = vars.tryGet(arrayName);
+        if (!arraySlot || !arraySlot->isArray) {
+            throwBasicError(9, "Subscript out of range", pos);
+        }
+        
+        // Extract pixel data from array - simplified version
+        // This is a placeholder - full implementation would need proper format handling
+        pixelData = {8, 0, 8, 0}; // width=8, height=8 header
+        for (int i = 0; i < 64; i++) {
+            pixelData.push_back(static_cast<uint8_t>(i % 16)); // dummy pattern
+        }
+        
+        // Initialize graphics context if needed
+        initializeGraphicsContext();
+        
+        // Execute PUT
+        if (!graphics.putBlock(x, y, pixelData, mode.c_str(), stepMode)) {
+            throwBasicError(5, "Illegal function call in PUT", pos);
+        }
+        
+        return 0;
+    }
+    
+    void initializeGraphicsContext() {
+        if (graphicsBufferCallback) {
+            uint8_t* buffer = graphicsBufferCallback();
+            if (buffer) {
+                // Assume current screen mode - in full implementation, track this
+                graphics.setMode(1, buffer); // Default to mode 1 for now
+                graphics.setDefaultColor(7); // Default to white
             }
         }
     }
