@@ -114,6 +114,11 @@ private:
     std::array<std::string, NUM_FUNCTION_KEYS> softKeys;
     bool functionKeysEnabled = true;  // Whether to display function keys
     
+    // Helper function to get effective text rows (excluding function key line)
+    int getTextRows() const {
+        return functionKeysEnabled ? rows - 1 : rows;
+    }
+    
     // State
     bool running;
     bool programMode;  // true = accepting program lines, false = immediate mode
@@ -397,7 +402,8 @@ private:
     }
     
     void clearScreen() {
-        for (int y = 0; y < rows && y < MAX_ROWS; y++) {
+        int textRows = getTextRows();
+        for (int y = 0; y < textRows && y < MAX_ROWS; y++) {
             for (int x = 0; x < cols && x < MAX_COLS; x++) {
                 screen[y][x] = {' ', PALETTE[currentForeground], PALETTE[currentBackground]};
             }
@@ -438,40 +444,45 @@ private:
         if (ch == '\n') {
             cursorX = 0;
             cursorY++;
-            if (cursorY >= rows) {
+            if (cursorY >= getTextRows()) {
                 scrollUp();
-                cursorY = rows - 1;
+                cursorY = getTextRows() - 1;
             }
         } else if (ch == '\r') {
             cursorX = 0;
         } else if (ch == '\b') {
             if (cursorX > 0) {
                 cursorX--;
-                screen[cursorY][cursorX] = {' ', PALETTE[currentForeground], PALETTE[currentBackground]};
+                if (cursorY >= 0 && cursorY < MAX_ROWS && cursorX >= 0 && cursorX < MAX_COLS) {
+                    screen[cursorY][cursorX] = {' ', PALETTE[currentForeground], PALETTE[currentBackground]};
+                }
             }
         } else if (ch >= 32 && ch <= 126) {
-            screen[cursorY][cursorX] = {ch, PALETTE[currentForeground], PALETTE[currentBackground]};
+            if (cursorY >= 0 && cursorY < MAX_ROWS && cursorX >= 0 && cursorX < MAX_COLS) {
+                screen[cursorY][cursorX] = {ch, PALETTE[currentForeground], PALETTE[currentBackground]};
+            }
             cursorX++;
             if (cursorX >= cols) {
                 cursorX = 0;
                 cursorY++;
-                if (cursorY >= rows) {
+                if (cursorY >= getTextRows()) {
                     scrollUp();
-                    cursorY = rows - 1;
+                    cursorY = getTextRows() - 1;
                 }
             }
         }
     }
     
     void scrollUp() {
-        for (int y = 0; y < rows - 1; y++) {
-            for (int x = 0; x < cols; x++) {
+        int textRows = getTextRows();
+        for (int y = 0; y < textRows - 1 && y < MAX_ROWS - 1; y++) {
+            for (int x = 0; x < cols && x < MAX_COLS; x++) {
                 screen[y][x] = screen[y + 1][x];
             }
         }
-        // Clear bottom line
-        for (int x = 0; x < cols; x++) {
-            screen[rows - 1][x] = {' ', PALETTE[currentForeground], PALETTE[currentBackground]};
+        // Clear bottom text line (but don't touch function key line)
+        for (int x = 0; x < cols && x < MAX_COLS; x++) {
+            screen[textRows - 1][x] = {' ', PALETTE[currentForeground], PALETTE[currentBackground]};
         }
     }
     
