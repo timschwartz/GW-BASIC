@@ -515,7 +515,18 @@ std::string Tokenizer::detokenize(const std::vector<uint8_t>& tokens) {
             } else {
                 // Regular character - could be part of identifier, punctuation, etc.
                 if (token >= 32 && token <= 126) { // Printable ASCII
-                    result << static_cast<char>(token);
+                    char c = static_cast<char>(token);
+                    
+                    // Add space before alphabetic characters if previous was not space/newline/alphabetic
+                    // This handles identifiers like LEN that were not tokenized as keywords
+                    if (std::isalpha(c) && !result.str().empty()) {
+                        char prevChar = result.str().back();
+                        if (prevChar != ' ' && prevChar != '\n' && !std::isalpha(prevChar)) {
+                            result << " ";
+                        }
+                    }
+                    
+                    result << c;
                 } else {
                     result << "[CHAR:" << std::hex << (int)token << std::dec << "]";
                 }
@@ -825,16 +836,33 @@ Tokenizer::Token Tokenizer::scanIdentifier() {
     if (matchMultiWordToken(word, fullToken)) {
         word = fullToken;
     }
-    
+
+    // Special case: LEN followed by = should not be tokenized as a function
+    // This handles "LEN=64" in OPEN statements
+    if (word == "LEN") {
+        // Look ahead to see if next non-whitespace character is =
+        size_t lookAhead = currentPosition;
+        while (lookAhead < currentSource.length() && 
+               (currentSource[lookAhead] == ' ' || currentSource[lookAhead] == '\t')) {
+            lookAhead++;
+        }
+        if (lookAhead < currentSource.length() && currentSource[lookAhead] == '=') {
+            // Don't tokenize LEN as a function, treat it as an identifier
+            Token token(TOKEN_IDENTIFIER, word, start, currentPosition - start);
+            for (char c : word) {
+                token.bytes.push_back(static_cast<uint8_t>(c));
+            }
+            return token;
+        }
+    }
+
     // Check if it's a reserved word
     Token token = matchReservedWord(word);
     if (token.type != TOKEN_UNKNOWN) {
         token.position = start;
         token.length = currentPosition - start;
         return token;
-    }
-    
-    // It's an identifier
+    }    // It's an identifier
     token = Token(TOKEN_IDENTIFIER, word, start, currentPosition - start);
     
     // Identifiers are stored as-is

@@ -340,8 +340,14 @@ private:
             uint8_t idx = b[pos++];
             // Minimal mapping for the few extended statements we support here
             switch (idx) {
+                case 0x01: // FIELD
+                    return doFIELD(b, pos);
                 case 0x02: // SYSTEM
                     return 0xFFFF; // terminate program
+                case 0x04: // LSET
+                    return doLSET(b, pos);
+                case 0x05: // RSET
+                    return doRSET(b, pos);
                 case 0x07: // PUT
                     return doPUT(b, pos);
                 case 0x08: // GET
@@ -830,6 +836,8 @@ private:
             mode = gwbasic::FileMode::OUTPUT;
         } else if (modeStr == "APPEND") {
             mode = gwbasic::FileMode::APPEND;
+        } else if (modeStr == "RANDOM") {
+            mode = gwbasic::FileMode::RANDOM;
         } else {
             throwBasicError(5, "Illegal function call: invalid file mode '" + modeStr + "'", pos);
         }
@@ -879,8 +887,79 @@ private:
             throwBasicError(52, "Bad file number", pos);
         }
         
+        // Check for LEN parameter for random access files
+        size_t recordLength = 128; // Default record length
+        if (mode == gwbasic::FileMode::RANDOM) {
+            skipSpaces(b, pos);
+            
+            // Check for LEN keyword - make this more flexible
+            if (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+                bool foundLen = false;
+                auto savePos = pos;
+                
+                // Check for tokenized LEN (0x11)
+                if (b[pos] == 0x11) {
+                    foundLen = true;
+                    ++pos;
+                } else if (b[pos] >= 0x20 && b[pos] < 0x80) {
+                    // Try to read ASCII "LEN" - skip any spaces that might be in between
+                    std::string word;
+                    auto tempPos = pos;
+                    
+                    // Read the next word, skipping spaces
+                    while (!atEnd(b, tempPos) && (std::isalpha(b[tempPos]) || std::isspace(b[tempPos]))) {
+                        if (std::isalpha(b[tempPos])) {
+                            word.push_back(static_cast<char>(std::toupper(b[tempPos])));
+                        }
+                        tempPos++;
+                        if (word.length() >= 3) break; // Stop after reading enough for "LEN"
+                    }
+                    
+                    if (word == "LEN") {
+                        foundLen = true;
+                        pos = tempPos; // Update position past the LEN word
+                    }
+                }
+                
+                if (foundLen) {
+                    skipSpaces(b, pos);
+                    
+                    // Look for = sign - be more flexible about what we accept
+                    // Note: = can be tokenized as different values depending on context
+                    bool foundEquals = false;
+                    if (!atEnd(b, pos)) {
+                        if (b[pos] == '=' || b[pos] == 0xD1 || b[pos] == 0xD2 || b[pos] == 0xE5) {
+                            foundEquals = true;
+                            ++pos; // consume =
+                        }
+                    }
+                    
+                    if (foundEquals) {
+                        skipSpaces(b, pos);
+                        
+                        // Parse record length
+                        auto lenRes = ev.evaluate(b, pos, env);
+                        pos = lenRes.nextPos;
+                        int len = expr::ExpressionEvaluator::toInt16(lenRes.value);
+                        
+                        if (len <= 0 || len > 32767) {
+                            throwBasicError(5, "Illegal function call: invalid record length", pos);
+                        }
+                        
+                        recordLength = static_cast<size_t>(len);
+                    } else {
+                        // If we found LEN but no =, it's an error
+                        throwBasicError(2, "Expected = after LEN", pos);
+                    }
+                } else {
+                    // Restore position if we didn't find LEN
+                    pos = savePos;
+                }
+            }
+        }
+        
         // Try to open the file
-        if (!fileManager.openFile(fileNumber, filename, mode)) {
+        if (!fileManager.openFile(fileNumber, filename, mode, recordLength)) {
             // Determine appropriate error message based on mode and filename
             if (mode == gwbasic::FileMode::INPUT) {
                 throwBasicError(53, "File not found", pos);
@@ -3543,6 +3622,60 @@ private:
     }
     
     uint16_t doGET(const std::vector<uint8_t>& b, size_t& pos) {
+        skipSpaces(b, pos);
+        
+        // Check for file GET: GET #filenumber, [recordnumber]
+        if (!atEnd(b, pos) && (b[pos] == '#' || b[pos] == 0xF7)) {
+            return doFileGET(b, pos);
+        }
+        
+        // Otherwise, it's graphics GET: GET [STEP] (x1,y1)-(x2,y2), arrayvar
+        return doGraphicsGET(b, pos);
+    }
+    
+    uint16_t doFileGET(const std::vector<uint8_t>& b, size_t& pos) {
+        // GET #filenumber, [recordnumber]
+        
+        // Consume the '#' token
+        if (!atEnd(b, pos) && (b[pos] == '#' || b[pos] == 0xF7)) {
+            ++pos;
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Parse file number
+        auto fileNumRes = ev.evaluate(b, pos, env);
+        pos = fileNumRes.nextPos;
+        int fileNumber = expr::ExpressionEvaluator::toInt16(fileNumRes.value);
+        
+        if (fileNumber < 1 || fileNumber > 255) {
+            throwBasicError(52, "Bad file number", pos);
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Optional record number
+        size_t recordNumber = 0;
+        if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) {
+            ++pos; // consume comma
+            skipSpaces(b, pos);
+            
+            if (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+                auto recNumRes = ev.evaluate(b, pos, env);
+                pos = recNumRes.nextPos;
+                recordNumber = static_cast<size_t>(expr::ExpressionEvaluator::toInt16(recNumRes.value));
+            }
+        }
+        
+        // Execute file GET
+        if (!fileManager.getRecord(static_cast<uint8_t>(fileNumber), recordNumber)) {
+            throwBasicError(62, "Input past end", pos);
+        }
+        
+        return 0;
+    }
+    
+    uint16_t doGraphicsGET(const std::vector<uint8_t>& b, size_t& pos) {
         // GET [STEP] (x1,y1)-(x2,y2), arrayvar
         skipSpaces(b, pos);
         
@@ -3675,6 +3808,60 @@ private:
     }
     
     uint16_t doPUT(const std::vector<uint8_t>& b, size_t& pos) {
+        skipSpaces(b, pos);
+        
+        // Check for file PUT: PUT #filenumber, [recordnumber]
+        if (!atEnd(b, pos) && (b[pos] == '#' || b[pos] == 0xF7)) {
+            return doFilePUT(b, pos);
+        }
+        
+        // Otherwise, it's graphics PUT: PUT [STEP] (x,y), arrayvar [,actionverb]
+        return doGraphicsPUT(b, pos);
+    }
+    
+    uint16_t doFilePUT(const std::vector<uint8_t>& b, size_t& pos) {
+        // PUT #filenumber, [recordnumber]
+        
+        // Consume the '#' token
+        if (!atEnd(b, pos) && (b[pos] == '#' || b[pos] == 0xF7)) {
+            ++pos;
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Parse file number
+        auto fileNumRes = ev.evaluate(b, pos, env);
+        pos = fileNumRes.nextPos;
+        int fileNumber = expr::ExpressionEvaluator::toInt16(fileNumRes.value);
+        
+        if (fileNumber < 1 || fileNumber > 255) {
+            throwBasicError(52, "Bad file number", pos);
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Optional record number
+        size_t recordNumber = 0;
+        if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) {
+            ++pos; // consume comma
+            skipSpaces(b, pos);
+            
+            if (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+                auto recNumRes = ev.evaluate(b, pos, env);
+                pos = recNumRes.nextPos;
+                recordNumber = static_cast<size_t>(expr::ExpressionEvaluator::toInt16(recNumRes.value));
+            }
+        }
+        
+        // Execute file PUT
+        if (!fileManager.putRecord(static_cast<uint8_t>(fileNumber), recordNumber)) {
+            throwBasicError(70, "Permission denied", pos);
+        }
+        
+        return 0;
+    }
+    
+    uint16_t doGraphicsPUT(const std::vector<uint8_t>& b, size_t& pos) {
         // PUT [STEP] (x,y), arrayvar [,actionverb]
         skipSpaces(b, pos);
         
@@ -3795,6 +3982,205 @@ private:
                 graphics.setDefaultColor(7); // Default to white
             }
         }
+    }
+    
+    uint16_t doFIELD(const std::vector<uint8_t>& b, size_t& pos) {
+        // FIELD #filenumber, fieldwidth AS string$[, fieldwidth AS string$]...
+        skipSpaces(b, pos);
+        
+        // Consume the '#' token
+        if (!atEnd(b, pos) && (b[pos] == '#' || b[pos] == 0xF7)) {
+            ++pos;
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Parse file number
+        auto fileNumRes = ev.evaluate(b, pos, env);
+        pos = fileNumRes.nextPos;
+        int fileNumber = expr::ExpressionEvaluator::toInt16(fileNumRes.value);
+        
+        if (fileNumber < 1 || fileNumber > 255) {
+            throwBasicError(52, "Bad file number", pos);
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Expect comma
+        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 0xF5)) {
+            throwBasicError(2, "Expected comma after file number in FIELD", pos);
+        }
+        ++pos; // consume comma
+        
+        skipSpaces(b, pos);
+        
+        // Parse field definitions
+        std::vector<std::pair<size_t, std::string>> fieldDefs;
+        
+        while (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+            // Parse field width
+            auto widthRes = ev.evaluate(b, pos, env);
+            pos = widthRes.nextPos;
+            int width = expr::ExpressionEvaluator::toInt16(widthRes.value);
+            
+            if (width <= 0) {
+                throwBasicError(5, "Illegal function call", pos);
+            }
+            
+            skipSpaces(b, pos);
+            
+            // Expect AS keyword
+            if (atEnd(b, pos) || !(b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "AS")) {
+                throwBasicError(2, "Expected AS in FIELD statement", pos);
+            }
+            ++pos; // consume AS token
+            
+            skipSpaces(b, pos);
+            
+            // Parse string variable name
+            std::string fieldName = readIdentifier(b, pos);
+            if (fieldName.empty()) {
+                throwBasicError(2, "Expected variable name in FIELD", pos);
+            }
+            
+            // Add string suffix if not present
+            if (fieldName.back() != '$') {
+                fieldName += '$';
+            }
+            
+            fieldDefs.emplace_back(static_cast<size_t>(width), fieldName);
+            
+            skipSpaces(b, pos);
+            
+            // Check for continuation
+            if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) {
+                ++pos; // consume comma
+                skipSpaces(b, pos);
+            } else {
+                break;
+            }
+        }
+        
+        // Execute FIELD
+        if (!fileManager.fieldFile(static_cast<uint8_t>(fileNumber), fieldDefs)) {
+            throwBasicError(52, "Bad file number", pos);
+        }
+        
+        return 0;
+    }
+    
+    uint16_t doLSET(const std::vector<uint8_t>& b, size_t& pos) {
+        // LSET string$ = expression
+        skipSpaces(b, pos);
+        
+        // Parse variable name
+        std::string varName = readIdentifier(b, pos);
+        if (varName.empty()) {
+            throwBasicError(2, "Expected variable name in LSET", pos);
+        }
+        
+        // Add string suffix if not present
+        if (varName.back() != '$') {
+            varName += '$';
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Expect = or tokenized equals
+        if (atEnd(b, pos) || !(b[pos] == '=' || b[pos] == 0xE6)) {
+            throwBasicError(2, "Expected = in LSET statement", pos);
+        }
+        ++pos; // consume =
+        
+        skipSpaces(b, pos);
+        
+        // Parse expression
+        auto valueRes = ev.evaluate(b, pos, env);
+        pos = valueRes.nextPos;
+        
+        std::string value;
+        std::visit([&](auto&& x) {
+            using T = std::decay_t<decltype(x)>;
+            if constexpr (std::is_same_v<T, expr::Str>) {
+                value = x.v;
+            } else {
+                // Convert numeric to string
+                if constexpr (std::is_same_v<T, expr::Int16>) {
+                    value = std::to_string(x.v);
+                } else if constexpr (std::is_same_v<T, expr::Single>) {
+                    value = std::to_string(x.v);
+                } else if constexpr (std::is_same_v<T, expr::Double>) {
+                    value = std::to_string(x.v);
+                }
+            }
+        }, valueRes.value);
+        
+        // Find which file this field belongs to and execute LSET
+        // For now, assume file #1 - in full implementation, track field variables
+        uint8_t fileNum = 1;
+        
+        if (!fileManager.lsetField(fileNum, varName, value)) {
+            throwBasicError(52, "Bad file number", pos);
+        }
+        
+        return 0;
+    }
+    
+    uint16_t doRSET(const std::vector<uint8_t>& b, size_t& pos) {
+        // RSET string$ = expression
+        skipSpaces(b, pos);
+        
+        // Parse variable name
+        std::string varName = readIdentifier(b, pos);
+        if (varName.empty()) {
+            throwBasicError(2, "Expected variable name in RSET", pos);
+        }
+        
+        // Add string suffix if not present
+        if (varName.back() != '$') {
+            varName += '$';
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Expect = or tokenized equals
+        if (atEnd(b, pos) || !(b[pos] == '=' || b[pos] == 0xE6)) {
+            throwBasicError(2, "Expected = in RSET statement", pos);
+        }
+        ++pos; // consume =
+        
+        skipSpaces(b, pos);
+        
+        // Parse expression
+        auto valueRes = ev.evaluate(b, pos, env);
+        pos = valueRes.nextPos;
+        
+        std::string value;
+        std::visit([&](auto&& x) {
+            using T = std::decay_t<decltype(x)>;
+            if constexpr (std::is_same_v<T, expr::Str>) {
+                value = x.v;
+            } else {
+                // Convert numeric to string
+                if constexpr (std::is_same_v<T, expr::Int16>) {
+                    value = std::to_string(x.v);
+                } else if constexpr (std::is_same_v<T, expr::Single>) {
+                    value = std::to_string(x.v);
+                } else if constexpr (std::is_same_v<T, expr::Double>) {
+                    value = std::to_string(x.v);
+                }
+            }
+        }, valueRes.value);
+        
+        // Find which file this field belongs to and execute RSET
+        // For now, assume file #1 - in full implementation, track field variables
+        uint8_t fileNum = 1;
+        
+        if (!fileManager.rsetField(fileNum, varName, value)) {
+            throwBasicError(52, "Bad file number", pos);
+        }
+        
+        return 0;
     }
 
 public:

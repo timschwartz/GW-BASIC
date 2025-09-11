@@ -17,6 +17,17 @@ enum class FileMode {
     RANDOM = 4    // Random access (not implemented yet)
 };
 
+// Record field definition for random access files
+struct FileField {
+    std::string name;
+    size_t offset;
+    size_t length;
+    bool isString;  // true for string fields, false for numeric
+    
+    FileField(const std::string& n, size_t off, size_t len, bool str = true)
+        : name(n), offset(off), length(len), isString(str) {}
+};
+
 // File handle structure
 struct FileHandle {
     uint8_t fileNumber;
@@ -25,9 +36,13 @@ struct FileHandle {
     std::unique_ptr<std::fstream> stream;
     bool isOpen;
     size_t position;  // Current read/write position
+    size_t recordLength;  // Record length for random access files
+    std::vector<FileField> fields;  // FIELD definitions for random access
+    std::vector<uint8_t> recordBuffer;  // Buffer for current record
     
-    FileHandle(uint8_t num, FileMode m, const std::string& name) 
-        : fileNumber(num), mode(m), filename(name), isOpen(false), position(0) {}
+    FileHandle(uint8_t num, FileMode m, const std::string& name, size_t recLen = 128) 
+        : fileNumber(num), mode(m), filename(name), isOpen(false), position(0), 
+          recordLength(recLen), recordBuffer(recLen, 0) {}
     
     // Check if file is at end
     bool isEOF() const {
@@ -40,6 +55,12 @@ struct FileHandle {
         if (!stream || !isOpen) return 0;
         return static_cast<size_t>(stream->tellg());
     }
+    
+    // Get current record number (1-based)
+    size_t getCurrentRecord() const {
+        if (mode != FileMode::RANDOM || recordLength == 0) return 0;
+        return (position / recordLength) + 1;
+    }
 };
 
 class FileManager {
@@ -51,8 +72,8 @@ public:
     FileManager(const FileManager&) = delete;
     FileManager& operator=(const FileManager&) = delete;
     
-    // OPEN "filename" FOR mode AS #filenumber
-    bool openFile(uint8_t fileNumber, const std::string& filename, FileMode mode);
+    // OPEN "filename" FOR mode AS #filenumber [LEN=recordlength]
+    bool openFile(uint8_t fileNumber, const std::string& filename, FileMode mode, size_t recordLength = 128);
     
     // CLOSE [#filenumber] - if no number specified, close all files
     bool closeFile(uint8_t fileNumber);
@@ -74,6 +95,25 @@ public:
     
     // Check if file is at EOF
     bool isEOF(uint8_t fileNumber) const;
+    
+    // Random access file operations
+    // FIELD #filenumber, fieldwidth AS string$[, fieldwidth AS string$]...
+    bool fieldFile(uint8_t fileNumber, const std::vector<std::pair<size_t, std::string>>& fieldDefs);
+    
+    // GET #filenumber, [recordnumber]
+    bool getRecord(uint8_t fileNumber, size_t recordNumber = 0);
+    
+    // PUT #filenumber, [recordnumber]  
+    bool putRecord(uint8_t fileNumber, size_t recordNumber = 0);
+    
+    // LSET string$ = expression - set field value left-justified
+    bool lsetField(uint8_t fileNumber, const std::string& fieldName, const std::string& value);
+    
+    // RSET string$ = expression - set field value right-justified
+    bool rsetField(uint8_t fileNumber, const std::string& fieldName, const std::string& value);
+    
+    // Get field value from current record buffer
+    std::string getFieldValue(uint8_t fileNumber, const std::string& fieldName) const;
     
     // Get list of open file numbers
     std::vector<uint8_t> getOpenFiles() const;

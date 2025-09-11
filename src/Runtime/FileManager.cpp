@@ -4,7 +4,7 @@
 
 namespace gwbasic {
 
-bool FileManager::openFile(uint8_t fileNumber, const std::string& filename, FileMode mode) {
+bool FileManager::openFile(uint8_t fileNumber, const std::string& filename, FileMode mode, size_t recordLength) {
     // Validate file number
     if (!isValidFileNumber(fileNumber)) {
         return false;
@@ -21,7 +21,7 @@ bool FileManager::openFile(uint8_t fileNumber, const std::string& filename, File
     }
     
     // Create new file handle
-    auto handle = std::make_unique<FileHandle>(fileNumber, mode, filename);
+    auto handle = std::make_unique<FileHandle>(fileNumber, mode, filename, recordLength);
     handle->stream = std::make_unique<std::fstream>();
     
     // Open the file with appropriate mode
@@ -29,6 +29,12 @@ bool FileManager::openFile(uint8_t fileNumber, const std::string& filename, File
     
     try {
         handle->stream->open(filename, openMode);
+        
+        // For RANDOM mode, if file doesn't exist, create it
+        if (mode == FileMode::RANDOM && !handle->stream->is_open()) {
+            handle->stream->clear(); // Clear any error flags
+            handle->stream->open(filename, std::ios::in | std::ios::out | std::ios::binary | std::ios::trunc);
+        }
         
         if (!handle->stream->is_open()) {
             return false; // Failed to open file
@@ -198,6 +204,7 @@ std::ios::openmode FileManager::getOpenMode(FileMode mode) const {
             return std::ios::out | std::ios::app;   // Append to existing file
         
         case FileMode::RANDOM:
+            // For random access, try to open existing file first, create if needed
             return std::ios::in | std::ios::out | std::ios::binary;
         
         default:
@@ -225,6 +232,195 @@ bool FileManager::validateFileForWrite(uint8_t fileNumber) const {
     return handle->mode == FileMode::OUTPUT || 
            handle->mode == FileMode::APPEND || 
            handle->mode == FileMode::RANDOM;
+}
+
+bool FileManager::fieldFile(uint8_t fileNumber, const std::vector<std::pair<size_t, std::string>>& fieldDefs) {
+    auto* handle = getFile(fileNumber);
+    if (!handle || !handle->isOpen || handle->mode != FileMode::RANDOM) {
+        return false;
+    }
+    
+    // Clear existing field definitions
+    handle->fields.clear();
+    
+    size_t offset = 0;
+    for (const auto& fieldDef : fieldDefs) {
+        size_t width = fieldDef.first;
+        const std::string& name = fieldDef.second;
+        
+        if (offset + width > handle->recordLength) {
+            return false; // Field extends beyond record length
+        }
+        
+        handle->fields.emplace_back(name, offset, width, true);
+        offset += width;
+    }
+    
+    return true;
+}
+
+bool FileManager::getRecord(uint8_t fileNumber, size_t recordNumber) {
+    auto* handle = getFile(fileNumber);
+    if (!handle || !handle->isOpen || handle->mode != FileMode::RANDOM) {
+        return false;
+    }
+    
+    try {
+        size_t targetPos;
+        if (recordNumber == 0) {
+            // Use current position
+            targetPos = handle->position;
+        } else {
+            // Calculate position for specific record (1-based)
+            targetPos = (recordNumber - 1) * handle->recordLength;
+        }
+        
+        // Seek to record position
+        handle->stream->seekg(targetPos);
+        if (handle->stream->fail()) {
+            return false;
+        }
+        
+        // Read record into buffer
+        handle->stream->read(reinterpret_cast<char*>(handle->recordBuffer.data()), 
+                           handle->recordLength);
+        
+        size_t bytesRead = static_cast<size_t>(handle->stream->gcount());
+        
+        // Pad with zeros if we read less than record length
+        if (bytesRead < handle->recordLength) {
+            std::fill(handle->recordBuffer.begin() + bytesRead, 
+                     handle->recordBuffer.end(), 0);
+        }
+        
+        handle->position = targetPos;
+        return true;
+        
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+bool FileManager::putRecord(uint8_t fileNumber, size_t recordNumber) {
+    auto* handle = getFile(fileNumber);
+    if (!handle || !handle->isOpen || handle->mode != FileMode::RANDOM) {
+        return false;
+    }
+    
+    try {
+        size_t targetPos;
+        if (recordNumber == 0) {
+            // Use current position
+            targetPos = handle->position;
+        } else {
+            // Calculate position for specific record (1-based)
+            targetPos = (recordNumber - 1) * handle->recordLength;
+        }
+        
+        // Seek to record position
+        handle->stream->seekp(targetPos);
+        if (handle->stream->fail()) {
+            return false;
+        }
+        
+        // Write record from buffer
+        handle->stream->write(reinterpret_cast<const char*>(handle->recordBuffer.data()), 
+                            handle->recordLength);
+        handle->stream->flush();
+        
+        if (handle->stream->fail()) {
+            return false;
+        }
+        
+        handle->position = targetPos;
+        return true;
+        
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+bool FileManager::lsetField(uint8_t fileNumber, const std::string& fieldName, const std::string& value) {
+    auto* handle = getFile(fileNumber);
+    if (!handle || !handle->isOpen || handle->mode != FileMode::RANDOM) {
+        return false;
+    }
+    
+    // Find the field
+    for (const auto& field : handle->fields) {
+        if (field.name == fieldName) {
+            // Left-justify the value in the field
+            std::string paddedValue = value;
+            if (paddedValue.length() > field.length) {
+                paddedValue = paddedValue.substr(0, field.length);
+            } else {
+                paddedValue.resize(field.length, ' '); // Pad with spaces
+            }
+            
+            // Copy to record buffer
+            std::copy(paddedValue.begin(), paddedValue.end(), 
+                     handle->recordBuffer.begin() + field.offset);
+            return true;
+        }
+    }
+    
+    return false; // Field not found
+}
+
+bool FileManager::rsetField(uint8_t fileNumber, const std::string& fieldName, const std::string& value) {
+    auto* handle = getFile(fileNumber);
+    if (!handle || !handle->isOpen || handle->mode != FileMode::RANDOM) {
+        return false;
+    }
+    
+    // Find the field
+    for (const auto& field : handle->fields) {
+        if (field.name == fieldName) {
+            // Right-justify the value in the field
+            std::string paddedValue;
+            if (value.length() > field.length) {
+                paddedValue = value.substr(0, field.length);
+            } else {
+                paddedValue = std::string(field.length - value.length(), ' ') + value;
+            }
+            
+            // Copy to record buffer
+            std::copy(paddedValue.begin(), paddedValue.end(), 
+                     handle->recordBuffer.begin() + field.offset);
+            return true;
+        }
+    }
+    
+    return false; // Field not found
+}
+
+std::string FileManager::getFieldValue(uint8_t fileNumber, const std::string& fieldName) const {
+    const auto* handle = getFile(fileNumber);
+    if (!handle || !handle->isOpen || handle->mode != FileMode::RANDOM) {
+        return "";
+    }
+    
+    // Find the field
+    for (const auto& field : handle->fields) {
+        if (field.name == fieldName) {
+            std::string value(handle->recordBuffer.begin() + field.offset,
+                            handle->recordBuffer.begin() + field.offset + field.length);
+            
+            // Remove trailing spaces for string fields
+            if (field.isString) {
+                size_t end = value.find_last_not_of(' ');
+                if (end != std::string::npos) {
+                    value = value.substr(0, end + 1);
+                } else {
+                    value.clear();
+                }
+            }
+            
+            return value;
+        }
+    }
+    
+    return ""; // Field not found
 }
 
 } // namespace gwbasic
