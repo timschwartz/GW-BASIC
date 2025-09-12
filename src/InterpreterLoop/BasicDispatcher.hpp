@@ -10,6 +10,8 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <filesystem>
+#include <algorithm>
 
 #include "../Tokenizer/Tokenizer.hpp"
 #include "../ProgramStore/ProgramStore.hpp"
@@ -341,14 +343,20 @@ private:
             uint8_t idx = b[pos++];
             // Minimal mapping for the few extended statements we support here
             switch (idx) {
+                case 0x00: // FILES
+                    return doFILES(b, pos);
                 case 0x01: // FIELD
                     return doFIELD(b, pos);
                 case 0x02: // SYSTEM
                     return 0xFFFF; // terminate program
+                case 0x03: // NAME
+                    return doNAME(b, pos);
                 case 0x04: // LSET
                     return doLSET(b, pos);
                 case 0x05: // RSET
                     return doRSET(b, pos);
+                case 0x06: // KILL
+                    return doKILL(b, pos);
                 case 0x07: // PUT
                     return doPUT(b, pos);
                 case 0x08: // GET
@@ -394,6 +402,155 @@ private:
         if (name == "PSET") return doPSET(b, pos);
         if (name == "PRESET") return doPRESET(b, pos);
         if (name == "LINE") return doLINE(b, pos);
+        return 0;
+    }
+
+    // FILES [filespec$]
+    uint16_t doFILES(const std::vector<uint8_t>& b, size_t& pos) {
+        using namespace std;
+        namespace fs = std::filesystem;
+
+        // Parse optional filespec expression
+        skipSpaces(b, pos);
+        string filespec;
+        bool hasArg = false;
+        if (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+            hasArg = true;
+            auto specRes = ev.evaluate(b, pos, env);
+            pos = specRes.nextPos;
+            visit([&](auto&& x){
+                using T = decay_t<decltype(x)>;
+                if constexpr (is_same_v<T, expr::Str>) {
+                    filespec = x.v;
+                } else {
+                    // In GW-BASIC, filespec is a string; reject non-strings
+                    this->throwBasicError(13, "Type mismatch: filespec must be string", pos);
+                }
+            }, specRes.value);
+        }
+
+        if (!hasArg) {
+            filespec = "*.*"; // DOS default
+        }
+
+        // Normalize path separators to '/'
+        for (char& c : filespec) { if (c == '\\') c = '/'; }
+
+        // Split directory and pattern
+        string dirPath = ".";
+        string pattern = filespec;
+        auto slashPos = filespec.find_last_of('/');
+        if (slashPos != string::npos) {
+            dirPath = filespec.substr(0, slashPos);
+            if (dirPath.empty()) dirPath = "/";
+            pattern = filespec.substr(slashPos + 1);
+            if (pattern.empty()) pattern = "*.*";
+        }
+
+        auto toUpper = [](string s){
+            for (auto& ch : s) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+            return s;
+        };
+
+        // Simple DOS-style wildcard matcher: * and ?
+        function<bool(const string&, const string&)> match = [&](const string& pat, const string& name) -> bool {
+            const string P = toUpper(pat);
+            const string N = toUpper(name);
+            size_t p = 0, n = 0, star = string::npos, matchIdx = 0;
+            while (n < N.size()) {
+                if (p < P.size() && (P[p] == '?' || P[p] == N[n])) { ++p; ++n; continue; }
+                if (p < P.size() && P[p] == '*') { star = p++; matchIdx = n; continue; }
+                if (star != string::npos) { p = star + 1; n = ++matchIdx; continue; }
+                return false;
+            }
+            while (p < P.size() && P[p] == '*') ++p;
+            return p == P.size();
+        };
+
+        vector<string> names;
+        try {
+            for (const auto& de : fs::directory_iterator(dirPath)) {
+                string name = de.path().filename().string();
+                if (match(pattern, name)) {
+                    names.push_back(name);
+                }
+            }
+        } catch (const std::exception&) {
+            // Directory doesn't exist or cannot be iterated
+            this->throwBasicError(53, "File not found", pos);
+        }
+
+        // Sort case-insensitively for stable output
+        std::sort(names.begin(), names.end(), [&](const string& a, const string& b){
+            return toUpper(a) < toUpper(b);
+        });
+
+        // Emit results, one per line
+        string out;
+        for (const auto& n : names) { out += n; out += '\n'; }
+        if (this->printCallback) this->printCallback(out);
+        return 0;
+    }
+
+    // KILL filename$
+    uint16_t doKILL(const std::vector<uint8_t>& b, size_t& pos) {
+        using namespace std;
+        namespace fs = std::filesystem;
+
+        // Parse filename expression (required)
+        skipSpaces(b, pos);
+        if (atEnd(b, pos) || b[pos] == ':' || b[pos] == 0x00) {
+            this->throwBasicError(2, "Missing filename in KILL statement", pos);
+        }
+
+        auto filenameRes = ev.evaluate(b, pos, env);
+        pos = filenameRes.nextPos;
+        
+        string filename;
+        visit([&](auto&& x){
+            using T = decay_t<decltype(x)>;
+            if constexpr (is_same_v<T, expr::Str>) {
+                filename = x.v;
+            } else {
+                // In GW-BASIC, filename must be a string
+                this->throwBasicError(13, "Type mismatch: filename must be string", pos);
+            }
+        }, filenameRes.value);
+
+        if (filename.empty()) {
+            this->throwBasicError(2, "Empty filename in KILL statement", pos);
+        }
+
+        // Normalize path separators
+        for (char& c : filename) { if (c == '\\') c = '/'; }
+
+        // Attempt to delete the file
+        try {
+            if (!fs::exists(filename)) {
+                this->throwBasicError(53, "File not found", pos);
+            }
+            
+            if (fs::is_directory(filename)) {
+                this->throwBasicError(70, "Permission denied", pos);
+            }
+            
+            if (!fs::remove(filename)) {
+                this->throwBasicError(70, "Permission denied", pos);
+            }
+            
+        } catch (const fs::filesystem_error&) {
+            this->throwBasicError(70, "Permission denied", pos);
+        } catch (const std::exception&) {
+            this->throwBasicError(70, "Permission denied", pos);
+        }
+
+        return 0;
+    }
+
+    // NAME oldname$ AS newname$ (placeholder for now)
+    uint16_t doNAME(const std::vector<uint8_t>& b, size_t& pos) {
+        // TODO: Implement NAME command for file renaming
+        this->throwBasicError(5, "Illegal function call: NAME not yet implemented", pos);
         return 0;
     }
 
