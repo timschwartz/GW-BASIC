@@ -171,6 +171,7 @@ private:
     gwbasic::DataManager dataManager;
     gwbasic::FileManager fileManager;
     gwbasic::UserFunctionManager userFunctionManager;
+    std::unordered_map<std::string, uint8_t> fieldToFileMap; // Maps field variable names to file numbers
     expr::Env env;
     PrintCallback printCallback;
     InputCallback inputCallback;
@@ -3629,8 +3630,27 @@ private:
             return doFileGET(b, pos);
         }
         
-        // Otherwise, it's graphics GET: GET [STEP] (x1,y1)-(x2,y2), arrayvar
-        return doGraphicsGET(b, pos);
+        // Check if it looks like a graphics GET by looking for opening parenthesis
+        // Graphics GET syntax: GET [STEP] (x1,y1)-(x2,y2), arrayvar
+        size_t lookAhead = pos;
+        skipSpaces(b, lookAhead);
+        
+        // Skip optional STEP keyword
+        if (!atEnd(b, lookAhead)) {
+            uint8_t t = b[lookAhead];
+            if (t >= 0x80 && tok && tok->getTokenName(t) == "STEP") {
+                ++lookAhead;
+                skipSpaces(b, lookAhead);
+            }
+        }
+        
+        // If we find an opening parenthesis, assume graphics GET
+        if (!atEnd(b, lookAhead) && (b[lookAhead] == '(' || b[lookAhead] == 0xF3)) {
+            return doGraphicsGET(b, pos);
+        }
+        
+        // Default to file GET if syntax is ambiguous
+        return doFileGET(b, pos);
     }
     
     uint16_t doFileGET(const std::vector<uint8_t>& b, size_t& pos) {
@@ -3670,6 +3690,18 @@ private:
         // Execute file GET
         if (!fileManager.getRecord(static_cast<uint8_t>(fileNumber), recordNumber)) {
             throwBasicError(62, "Input past end", pos);
+        }
+        
+        // Update field variables in the variable table with values from record buffer
+        auto* fileHandle = fileManager.getFile(static_cast<uint8_t>(fileNumber));
+        if (fileHandle) {
+            for (const auto& field : fileHandle->fields) {
+                std::string fieldValue = fileManager.getFieldValue(static_cast<uint8_t>(fileNumber), field.name);
+                gwbasic::StrDesc strDesc;
+                if (strHeap.allocCopy(fieldValue.c_str(), strDesc)) {
+                    vars.assignString(field.name, strDesc);
+                }
+            }
         }
         
         return 0;
@@ -3815,8 +3847,27 @@ private:
             return doFilePUT(b, pos);
         }
         
-        // Otherwise, it's graphics PUT: PUT [STEP] (x,y), arrayvar [,actionverb]
-        return doGraphicsPUT(b, pos);
+        // Check if it looks like a graphics PUT by looking for opening parenthesis
+        // Graphics PUT syntax: PUT [STEP] (x,y), arrayvar [,actionverb]
+        size_t lookAhead = pos;
+        skipSpaces(b, lookAhead);
+        
+        // Skip optional STEP keyword
+        if (!atEnd(b, lookAhead)) {
+            uint8_t t = b[lookAhead];
+            if (t >= 0x80 && tok && tok->getTokenName(t) == "STEP") {
+                ++lookAhead;
+                skipSpaces(b, lookAhead);
+            }
+        }
+        
+        // If we find an opening parenthesis, assume graphics PUT
+        if (!atEnd(b, lookAhead) && (b[lookAhead] == '(' || b[lookAhead] == 0xF3)) {
+            return doGraphicsPUT(b, pos);
+        }
+        
+        // Default to file PUT if syntax is ambiguous
+        return doFilePUT(b, pos);
     }
     
     uint16_t doFilePUT(const std::vector<uint8_t>& b, size_t& pos) {
@@ -3985,15 +4036,14 @@ private:
     }
     
     uint16_t doFIELD(const std::vector<uint8_t>& b, size_t& pos) {
-        // FIELD #filenumber, fieldwidth AS string$[, fieldwidth AS string$]...
+        // FIELD [#]filenumber, fieldwidth AS string$[, fieldwidth AS string$]...
         skipSpaces(b, pos);
         
-        // Consume the '#' token
-        if (!atEnd(b, pos) && (b[pos] == '#' || b[pos] == 0xF7)) {
-            ++pos;
+        // Optional # prefix (ASCII or tokenized)
+        if (!atEnd(b, pos) && (b[pos] == '#' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "#"))) {
+            ++pos; // consume #
+            skipSpaces(b, pos);
         }
-        
-        skipSpaces(b, pos);
         
         // Parse file number
         auto fileNumRes = ev.evaluate(b, pos, env);
@@ -4029,11 +4079,27 @@ private:
             
             skipSpaces(b, pos);
             
-            // Expect AS keyword
-            if (atEnd(b, pos) || !(b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "AS")) {
+            // Expect AS keyword (tokenized or ASCII)
+            bool hasAs = false;
+            if (!atEnd(b, pos)) {
+                uint8_t t = b[pos];
+                if (t >= 0x80 && tok && tok->getTokenName(t) == "AS") {
+                    ++pos;
+                    hasAs = true;
+                } else if (t >= 0x20 && t < 0x80) {
+                    // Try ASCII "AS"
+                    auto save = pos;
+                    std::string asWord;
+                    for (int i = 0; i < 2 && !atEnd(b, pos) && b[pos] >= 0x20 && b[pos] < 0x80; ++i) {
+                        asWord.push_back(static_cast<char>(std::toupper(b[pos++])));
+                    }
+                    if (asWord == "AS") hasAs = true; else pos = save;
+                }
+            }
+            
+            if (!hasAs) {
                 throwBasicError(2, "Expected AS in FIELD statement", pos);
             }
-            ++pos; // consume AS token
             
             skipSpaces(b, pos);
             
@@ -4066,6 +4132,14 @@ private:
             throwBasicError(52, "Bad file number", pos);
         }
         
+        // Initialize all field variables as empty strings in the variable table
+        // and track which file they belong to
+        for (const auto& fieldDef : fieldDefs) {
+            const std::string& varName = fieldDef.second;
+            vars.createString(varName, "");  // Use existing createString method
+            fieldToFileMap[varName] = static_cast<uint8_t>(fileNumber);
+        }
+        
         return 0;
     }
     
@@ -4086,8 +4160,8 @@ private:
         
         skipSpaces(b, pos);
         
-        // Expect = or tokenized equals
-        if (atEnd(b, pos) || !(b[pos] == '=' || b[pos] == 0xE6)) {
+        // Expect = or tokenized equals (various formats: 0xD1, 0xD2, 0xE5, 0xE6)
+        if (atEnd(b, pos) || !(b[pos] == '=' || b[pos] == 0xD1 || b[pos] == 0xD2 || b[pos] == 0xE5 || b[pos] == 0xE6)) {
             throwBasicError(2, "Expected = in LSET statement", pos);
         }
         ++pos; // consume =
@@ -4116,11 +4190,20 @@ private:
         }, valueRes.value);
         
         // Find which file this field belongs to and execute LSET
-        // For now, assume file #1 - in full implementation, track field variables
-        uint8_t fileNum = 1;
+        auto it = fieldToFileMap.find(varName);
+        if (it == fieldToFileMap.end()) {
+            throwBasicError(2, "Variable not a field variable", pos);
+        }
+        uint8_t fileNum = it->second;
         
         if (!fileManager.lsetField(fileNum, varName, value)) {
             throwBasicError(52, "Bad file number", pos);
+        }
+        
+        // Also set the variable in the variable table so it can be accessed
+        gwbasic::StrDesc strDesc;
+        if (strHeap.allocCopy(value.c_str(), strDesc)) {
+            vars.assignString(varName, strDesc);
         }
         
         return 0;
@@ -4143,8 +4226,8 @@ private:
         
         skipSpaces(b, pos);
         
-        // Expect = or tokenized equals
-        if (atEnd(b, pos) || !(b[pos] == '=' || b[pos] == 0xE6)) {
+        // Expect = or tokenized equals (various formats: 0xD1, 0xD2, 0xE5, 0xE6)
+        if (atEnd(b, pos) || !(b[pos] == '=' || b[pos] == 0xD1 || b[pos] == 0xD2 || b[pos] == 0xE5 || b[pos] == 0xE6)) {
             throwBasicError(2, "Expected = in RSET statement", pos);
         }
         ++pos; // consume =
@@ -4173,11 +4256,20 @@ private:
         }, valueRes.value);
         
         // Find which file this field belongs to and execute RSET
-        // For now, assume file #1 - in full implementation, track field variables
-        uint8_t fileNum = 1;
+        auto it = fieldToFileMap.find(varName);
+        if (it == fieldToFileMap.end()) {
+            throwBasicError(2, "Variable not a field variable", pos);
+        }
+        uint8_t fileNum = it->second;
         
         if (!fileManager.rsetField(fileNum, varName, value)) {
             throwBasicError(52, "Bad file number", pos);
+        }
+        
+        // Also set the variable in the variable table so it can be accessed
+        gwbasic::StrDesc strDesc;
+        if (strHeap.allocCopy(value.c_str(), strDesc)) {
+            vars.assignString(varName, strDesc);
         }
         
         return 0;
