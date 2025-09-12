@@ -429,6 +429,40 @@ std::string Tokenizer::detokenize(const std::vector<uint8_t>& tokens) {
             } else {
                 i++;
             }
+        } else if (token == EXTENDED_STATEMENT_PREFIX || 
+                   token == STANDARD_FUNCTION_PREFIX || 
+                   token == EXTENDED_FUNCTION_PREFIX) {
+            // Two-byte token
+            if (i + 1 < tokens.size()) {
+                uint8_t index = tokens[i + 1];
+                bool found = false;
+                // Find the corresponding reserved word
+                for (const auto& pair : reservedWords) {
+                    const ReservedWord& word = pair.second;
+                    if (word.prefix == token && word.index == index) {
+                        // Add space before word if needed (but not at start or after space/newline)
+                        if (!result.str().empty()) {
+                            char last = result.str().back();
+                            if (last != ' ' && last != '\n' && last != ':') {
+                                result << " ";
+                            }
+                        }
+                        result << word.name;
+                        // Add trailing space after extended word to separate from following tokens
+                        result << " ";
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    result << "[UNKNOWN:" << std::hex << (int)token << ":" 
+                            << (int)index << std::dec << "]";
+                }
+                i += 2;
+            } else {
+                result << "[INCOMPLETE]";
+                i++;
+            }
         } else if (token >= FIRST_STATEMENT_TOKEN) {
             // Single-byte token
             auto it = tokenNames.find(token);
@@ -444,7 +478,7 @@ std::string Tokenizer::detokenize(const std::vector<uint8_t>& tokens) {
                 if (token != TOKEN_REM) {
                     // Do not add trailing space after certain punctuation tokens
                     // Especially after '#', we want "#1" not "# 1"
-                    if (name != "#" && name != "(" ) {
+                    if (name != "#" && name != "(") {
                         result << " ";
                     }
                 }
@@ -452,34 +486,6 @@ std::string Tokenizer::detokenize(const std::vector<uint8_t>& tokens) {
                 result << "[UNKNOWN:" << std::hex << (int)token << std::dec << "]";
             }
             i++;
-        } else if (token == EXTENDED_STATEMENT_PREFIX || 
-                   token == STANDARD_FUNCTION_PREFIX || 
-                   token == EXTENDED_FUNCTION_PREFIX) {
-            // Two-byte token
-            if (i + 1 < tokens.size()) {
-                uint8_t index = tokens[i + 1];
-                bool found = false;
-                // Find the corresponding reserved word
-                for (const auto& pair : reservedWords) {
-                    const ReservedWord& word = pair.second;
-                    if (word.prefix == token && word.index == index) {
-                        result << word.name;
-                        if (!result.str().empty() && result.str().back() != ' ') {
-                            result << " ";
-                        }
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) {
-                    result << "[UNKNOWN:" << std::hex << (int)token << ":" 
-                            << (int)index << std::dec << "]";
-                }
-                i += 2;
-            } else {
-                result << "[INCOMPLETE]";
-                i++;
-            }
         } else if (token == '"') {
             // String literal
             result << '"';

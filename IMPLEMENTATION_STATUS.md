@@ -2,7 +2,7 @@
 
 A comprehensive status overview of the GW-BASIC reimplementation in C++.
 
-**Last Updated:** September 11, 2025  
+**Last Updated:** September 12, 2025  
 **Current Version:** 0.1
 
 ## Summary
@@ -11,7 +11,7 @@ This project - ✅ **SAVE**: Basic file I/O for program storage
 - ✅ **SCREEN Statement**: Complete implementation with 14 video modes (0-13), dynamic window resizing, graphics mode switching, and text framebuffer overlay for graphics modes
 - ✅ **COLOR Statement**: Complete foreground and background color support with standard 16-color CGA/EGA/VGA palette (colors 0-15 for foreground, 0-7 for background)
 - ✅ **Sequential File I/O**: Complete OPEN, CLOSE, PRINT#, INPUT# implementation with file mode support (INPUT/OUTPUT/APPEND), file number management, and proper tokenizer integration
-- ✅ **Random Access File Support**: OPEN statement with LEN parameter for custom record lengths, proper tokenization and parsing of LEN=value syntax
+ - ✅ **Random Access File Support**: OPEN with LEN for custom record lengths, plus FIELD/LSET/RSET mapping and GET/PUT record I/O
 
 This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 95% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, comprehensive event trap handling, full function key support, complete SCREEN statement with graphics mode support and text framebuffer, user-defined function support (DEF FN), complete INPUT/PRINT behavior aligned with GW-BASIC semantics, and fixed OPEN statement LEN parameter support. Recent work added comprehensive function key support (F1-F10) with soft key expansion and event trap integration, unified console and GUI execution through the InterpreterLoop, added extended-statement handling (including SYSTEM), fixed PRINT/PRINT USING parsing at line terminators, implemented full SCREEN statement functionality with 14 video modes, dynamic window resizing, and scaled text overlay for graphics modes, and completed DEF FN user-defined function implementation with proper error handling and line number reporting.
 
@@ -219,7 +219,7 @@ This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be comp
 - ✅ **LOAD/SAVE**: Basic file I/O for program storage
 - ✅ **SCREEN Statement**: Complete implementation with 14 video modes (0-13), dynamic window resizing, graphics mode switching, and text framebuffer overlay for graphics modes
 - ✅ **Sequential File I/O**: Complete OPEN, CLOSE, PRINT#, INPUT# implementation with file mode support (INPUT/OUTPUT/APPEND), file number validation, and proper tokenizer integration for '#' operator and 'AS' keyword
-- ✅ **Random Access File Support**: OPEN statement with LEN parameter parsing for custom record lengths (e.g., OPEN "file.dat" FOR RANDOM AS #1 LEN = 64)
+- ✅ **Random Access File Support**: OPEN with LEN for custom record lengths, plus FIELD/LSET/RSET and GET/PUT record I/O
 - ✅ **Graphics Drawing**: Complete PSET, LINE, CIRCLE implementation with coordinate parsing, color parameter support, proper tokenization handling for parentheses (244), commas (246), and minus operators (232), and integration with GraphicsContext API
 - ✅ **Error Handling Enhancement**: Improved error reporting with proper line number context for syntax errors, ensuring all expression evaluator exceptions are caught and re-thrown with line information
 - ✅ **OPEN Statement LEN Parameter**: Fixed tokenization and parsing issues with LEN parameter syntax, supporting multiple = token formats (0xD1, 0xD2, 0xE5) for robust parsing
@@ -279,14 +279,14 @@ This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be comp
  - 🧪 Additional functions available via ExpressionEvaluator built-ins: CHR$, STR$, VAL
 - ✅ **String Arrays**: Multi-dimensional string storage with full ArrayManager integration
 
-### File I/O System (80% Complete)
+### File I/O System (95% Complete)
 - ✅ **LOAD/SAVE**: Basic program file operations
 - ✅ **Sequential Files**: Complete OPEN, CLOSE, INPUT#, PRINT# implementation with file mode support (INPUT/OUTPUT/APPEND), file number management (1-255), and proper error handling
 - ✅ **Random Access OPEN**: OPEN statement with LEN parameter support for custom record lengths (e.g., LEN = 64, LEN = 256)
 - ✅ **File Manager**: FileManager component providing file operations with mode validation and integrated error mapping
 - ✅ **Tokenizer Integration**: Complete support for '#' operator and 'AS' keyword with proper spacing in LIST output
 - ✅ **LEN Parameter Parsing**: Fixed tokenization issues with LEN=value syntax, supporting multiple = token formats for robust parsing
-- ❌ **Random Access Operations**: GET, PUT, field operations for reading/writing records
+- ✅ **Random Access Operations**: FIELD mapping, LSET/RSET, and GET/PUT for random-access records with proper buffer management and GW-BASIC-compatible padding/trim semantics
 - ❌ **Directory Operations**: FILES, KILL, NAME
 
 ### Input/Output (85% Complete)
@@ -384,8 +384,7 @@ Recent fixes:
 ## 🎯 Next Priority Items
 
 ### High Priority (Core Language Completion)
-1. **Random File I/O Operations**: GET, PUT operations for reading/writing records to random access files
-2. **Error Handling Enhancement**: ON ERROR GOTO and RESUME statements beyond basic traps
+1. **Error Handling Enhancement**: ON ERROR GOTO and RESUME statements beyond basic traps
 3. **Directory Operations**: FILES, KILL, NAME statements for file management
 4. **Advanced Graphics**: GET, PUT operations for sprite/image manipulation
 
@@ -402,7 +401,6 @@ Recent fixes:
 ## 🚧 Known Issues
 
 ### Critical Issues
-- No random file I/O operations (GET, PUT for reading/writing records)
 - Limited error handling in expressions
 
 ### Important Issues  
@@ -469,7 +467,7 @@ It supports:
 - **User-defined functions**: DEF FN statement support with function definition and FN function call syntax
 - Program LOAD/SAVE operations
 - **Sequential file I/O**: OPEN, CLOSE, PRINT#, INPUT# with file mode support (INPUT/OUTPUT/APPEND)
-- **Random access file support**: OPEN with LEN parameter for custom record lengths (e.g., LEN = 64)
+- **Random access file support**: OPEN with LEN for custom record lengths, plus FIELD/LSET/RSET mapping and GET/PUT for record I/O
 - Interactive command shell; SYSTEM halts program as an extended statement
 - Function key support (F1-F10) with soft key expansion and event trap integration
 - Microsoft Binary Format (MBF) compatibility for numeric accuracy

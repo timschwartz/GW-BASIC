@@ -823,6 +823,14 @@ Value ExpressionEvaluator::parseExpression(const std::vector<uint8_t>& b, size_t
         }
 
         if (op.op == "+" || op.op == "-" || op.op == "*" || op.op == "/" || op.op == "^" || op.op == "\\" || op.op == "MOD") {
+            // Support string concatenation with '+' as in GW-BASIC
+            if (op.op == "+" && std::holds_alternative<Str>(lhs) && std::holds_alternative<Str>(rhs)) {
+                const auto& a = std::get<Str>(lhs).v;
+                const auto& c = std::get<Str>(rhs).v;
+                lhs = Str{a + c};
+                skipSpaces(b, pos);
+                continue;
+            }
             if (!isNumeric(lhs) || !isNumeric(rhs)) throw BasicError(13, "Type mismatch", pos);
             double a = toDouble(lhs);
             double c = toDouble(rhs);

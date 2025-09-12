@@ -404,7 +404,7 @@ private:
         bool isFileOutput = false;
         
     // Check if starts with # (file number) - ASCII or tokenized
-    if (!atEnd(b, pos) && (b[pos] == '#' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "#"))) {
+        if (!atEnd(b, pos) && (b[pos] == '#' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "#"))) {
             ++pos; // consume #
             skipSpaces(b, pos);
             
@@ -3626,7 +3626,7 @@ private:
         skipSpaces(b, pos);
         
         // Check for file GET: GET #filenumber, [recordnumber]
-        if (!atEnd(b, pos) && (b[pos] == '#' || b[pos] == 0xF7)) {
+        if (!atEnd(b, pos) && (b[pos] == '#' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "#"))) {
             return doFileGET(b, pos);
         }
         
@@ -3645,7 +3645,7 @@ private:
         }
         
         // If we find an opening parenthesis, assume graphics GET
-        if (!atEnd(b, lookAhead) && (b[lookAhead] == '(' || b[lookAhead] == 0xF3)) {
+        if (!atEnd(b, lookAhead) && (b[lookAhead] == '(' || (b[lookAhead] >= 0x80 && tok && tok->getTokenName(b[lookAhead]) == "("))) {
             return doGraphicsGET(b, pos);
         }
         
@@ -3656,8 +3656,8 @@ private:
     uint16_t doFileGET(const std::vector<uint8_t>& b, size_t& pos) {
         // GET #filenumber, [recordnumber]
         
-        // Consume the '#' token
-        if (!atEnd(b, pos) && (b[pos] == '#' || b[pos] == 0xF7)) {
+        // Consume the '#' token (ASCII or tokenized)
+        if (!atEnd(b, pos) && (b[pos] == '#' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "#"))) {
             ++pos;
         }
         
@@ -3676,7 +3676,7 @@ private:
         
         // Optional record number
         size_t recordNumber = 0;
-        if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) {
+        if (!atEnd(b, pos) && (b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) {
             ++pos; // consume comma
             skipSpaces(b, pos);
             
@@ -3723,7 +3723,7 @@ private:
         }
         
         // Parse first corner
-        if (atEnd(b, pos) || !(b[pos] == '(' || b[pos] == 0xF3)) {
+        if (atEnd(b, pos) || !(b[pos] == '(' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "("))) {
             throwBasicError(2, "Expected ( in GET statement", pos);
         }
         ++pos; // consume (
@@ -3736,7 +3736,7 @@ private:
         
         skipSpaces(b, pos);
         
-        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 0xF5)) {
+        if (atEnd(b, pos) || !(b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) {
             throwBasicError(2, "Expected comma in GET coordinates", pos);
         }
         ++pos; // consume comma
@@ -3749,7 +3749,7 @@ private:
         
         skipSpaces(b, pos);
         
-        if (atEnd(b, pos) || !(b[pos] == ')' || b[pos] == 0xF4)) {
+        if (atEnd(b, pos) || !(b[pos] == ')' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ")"))) {
             throwBasicError(2, "Expected ) in GET coordinates", pos);
         }
         ++pos; // consume )
@@ -3765,7 +3765,7 @@ private:
         skipSpaces(b, pos);
         
         // Parse second corner
-        if (atEnd(b, pos) || !(b[pos] == '(' || b[pos] == 0xF3)) {
+        if (atEnd(b, pos) || !(b[pos] == '(' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "("))) {
             throwBasicError(2, "Expected ( for second corner in GET", pos);
         }
         ++pos; // consume (
@@ -3778,7 +3778,7 @@ private:
         
         skipSpaces(b, pos);
         
-        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 0xF5)) {
+        if (atEnd(b, pos) || !(b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) {
             throwBasicError(2, "Expected comma in GET second coordinates", pos);
         }
         ++pos; // consume comma
@@ -3791,7 +3791,7 @@ private:
         
         skipSpaces(b, pos);
         
-        if (atEnd(b, pos) || !(b[pos] == ')' || b[pos] == 0xF4)) {
+        if (atEnd(b, pos) || !(b[pos] == ')' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ")"))) {
             throwBasicError(2, "Expected ) in GET second coordinates", pos);
         }
         ++pos; // consume )
@@ -3799,7 +3799,7 @@ private:
         skipSpaces(b, pos);
         
         // Expect comma before array variable
-        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 0xF5)) {
+        if (atEnd(b, pos) || !(b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) {
             throwBasicError(2, "Expected comma before array in GET", pos);
         }
         ++pos; // consume comma
@@ -3843,7 +3843,7 @@ private:
         skipSpaces(b, pos);
         
         // Check for file PUT: PUT #filenumber, [recordnumber]
-        if (!atEnd(b, pos) && (b[pos] == '#' || b[pos] == 0xF7)) {
+        if (!atEnd(b, pos) && (b[pos] == '#' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "#"))) {
             return doFilePUT(b, pos);
         }
         
@@ -3862,7 +3862,7 @@ private:
         }
         
         // If we find an opening parenthesis, assume graphics PUT
-        if (!atEnd(b, lookAhead) && (b[lookAhead] == '(' || b[lookAhead] == 0xF3)) {
+        if (!atEnd(b, lookAhead) && (b[lookAhead] == '(' || (b[lookAhead] >= 0x80 && tok && tok->getTokenName(b[lookAhead]) == "("))) {
             return doGraphicsPUT(b, pos);
         }
         
@@ -3874,7 +3874,7 @@ private:
         // PUT #filenumber, [recordnumber]
         
         // Consume the '#' token
-        if (!atEnd(b, pos) && (b[pos] == '#' || b[pos] == 0xF7)) {
+        if (!atEnd(b, pos) && (b[pos] == '#' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "#"))) {
             ++pos;
         }
         
@@ -3893,7 +3893,7 @@ private:
         
         // Optional record number
         size_t recordNumber = 0;
-        if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) {
+        if (!atEnd(b, pos) && (b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) {
             ++pos; // consume comma
             skipSpaces(b, pos);
             
@@ -3928,7 +3928,7 @@ private:
         }
         
         // Parse position
-        if (atEnd(b, pos) || !(b[pos] == '(' || b[pos] == 0xF3)) {
+        if (atEnd(b, pos) || !(b[pos] == '(' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "("))) {
             throwBasicError(2, "Expected ( in PUT statement", pos);
         }
         ++pos; // consume (
@@ -3941,7 +3941,7 @@ private:
         
         skipSpaces(b, pos);
         
-        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 0xF5)) {
+        if (atEnd(b, pos) || !(b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) {
             throwBasicError(2, "Expected comma in PUT coordinates", pos);
         }
         ++pos; // consume comma
@@ -3954,7 +3954,7 @@ private:
         
         skipSpaces(b, pos);
         
-        if (atEnd(b, pos) || !(b[pos] == ')' || b[pos] == 0xF4)) {
+        if (atEnd(b, pos) || !(b[pos] == ')' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ")"))) {
             throwBasicError(2, "Expected ) in PUT coordinates", pos);
         }
         ++pos; // consume )
@@ -3962,7 +3962,7 @@ private:
         skipSpaces(b, pos);
         
         // Expect comma before array variable
-        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 0xF5)) {
+        if (atEnd(b, pos) || !(b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) {
             throwBasicError(2, "Expected comma before array in PUT", pos);
         }
         ++pos; // consume comma
@@ -4056,8 +4056,11 @@ private:
         
         skipSpaces(b, pos);
         
-        // Expect comma
-        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 0xF5)) {
+        // Expect comma (accept ASCII or tokenized comma variants)
+        if (atEnd(b, pos) || !(
+            b[pos] == ',' || b[pos] == 0xF5 ||
+            (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ",")
+        )) {
             throwBasicError(2, "Expected comma after file number in FIELD", pos);
         }
         ++pos; // consume comma
@@ -4119,7 +4122,10 @@ private:
             skipSpaces(b, pos);
             
             // Check for continuation
-            if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) {
+            if (!atEnd(b, pos) && (
+                b[pos] == ',' || b[pos] == 0xF5 ||
+                (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ",")
+            )) {
                 ++pos; // consume comma
                 skipSpaces(b, pos);
             } else {
