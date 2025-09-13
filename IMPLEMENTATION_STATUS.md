@@ -7,11 +7,12 @@ A comprehensive status overview of the GW-BASIC reimplementation in C++.
 
 ## Summary
 
-This project - ✅ **SAVE**: Basic file I/O for program storage
+This project includes:
+ - ✅ **SAVE**: Basic file I/O for program storage
 - ✅ **SCREEN Statement**: Complete implementation with 14 video modes (0-13), dynamic window resizing, graphics mode switching, and text framebuffer overlay for graphics modes
 - ✅ **COLOR Statement**: Complete foreground and background color support with standard 16-color CGA/EGA/VGA palette (colors 0-15 for foreground, 0-7 for background)
 - ✅ **Sequential File I/O**: Complete OPEN, CLOSE, PRINT#, INPUT# implementation with file mode support (INPUT/OUTPUT/APPEND), file number management, and proper tokenizer integration
- - ✅ **Random Access File Support**: OPEN with LEN for custom record lengths, plus FIELD/LSET/RSET mapping and GET/PUT record I/O
+ - ✅ **Random Access File Support**: OPEN with LEN for custom record lengths, plus FIELD/LSET/RSET mapping and GET/PUT record I/O (file-side complete)
 - ✅ **FILES Command**: Implemented extended statement FILES with DOS-style wildcard matching (* and ?) and optional path prefix; outputs matching names via print callback
 - ✅ **KILL Command**: Implemented extended statement KILL for file deletion with proper error handling for non-existent files and directories
 - ✅ **NAME Command**: Implemented extended statement NAME for file renaming with 'oldname AS newname' syntax and comprehensive error handling
@@ -293,7 +294,7 @@ This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be comp
 - ✅ **Tokenizer Integration**: Complete support for '#' operator and 'AS' keyword with proper spacing in LIST output
 - ✅ **LEN Parameter Parsing**: Fixed tokenization issues with LEN=value syntax, supporting multiple = token formats for robust parsing
 - ✅ **Random Access Operations**: FIELD mapping, LSET/RSET, and GET/PUT for random-access records with proper buffer management and GW-BASIC-compatible padding/trim semantics
-- ❌ **Directory Operations**: FILES, KILL, NAME
+- ✅ **Directory Operations**: FILES (wildcards and optional path), KILL (file delete), NAME (rename with AS) implemented with filesystem error mapping to GW-BASIC error codes
 
 ### Input/Output (85% Complete)
 - ✅ **PRINT**: Basic output with some formatting
@@ -314,17 +315,15 @@ Recent fixes:
 - ✅ **COLOR Statement**: Complete implementation with foreground and background color support (0-15 foreground, 0-7 background) using standard CGA/EGA/VGA 16-color palette
 - ✅ **Graphics Drawing**: Complete PSET, LINE, CIRCLE implementation with coordinate parsing, color support, and proper tokenization handling
 - ✅ **GraphicsContext**: Full graphics drawing API with Bresenham line algorithm, midpoint circle algorithm, and SDL3 pixel buffer integration
-- ❌ **Advanced Graphics**: GET, PUT statements for sprite/image manipulation
+- ⚠️ **Advanced Graphics**: GET, PUT statements for sprite/image manipulation
+  - File GET/PUT for random-access records is complete (see File I/O System)
+  - Graphics GET/PUT is partially implemented: supports capturing/putting rectangular blocks, but uses a simplified array format and default mode; action verbs and full GW-BASIC block format are not yet compatible
 - ❌ **Sound**: SOUND, PLAY, BEEP statements
 
 ## ❌ Not Implemented
 
-### Advanced Language Features
-- ✅ **Arrays**: Complete implementation - DIM statement support, array element access (A(I,J) and A[I,J) syntax), multi-dimensional arrays, and full integration with expression evaluator and variable table
-- ✅ **Event Traps**: Complete implementation - ON KEY, ON ERROR, ON TIMER event handling with EventTrapSystem, event injection, trap configuration, and integration with InterpreterLoop and BasicDispatcher
-- ✅ **Data Statements**: Complete DATA, READ, RESTORE implementation with DataManager component for sequential data processing
-- ✅ **User-Defined Functions**: Complete DEF FN implementation with function definition parsing, parameter binding, expression evaluation, and FN function call syntax support
-- ❌ **Error Handling**: Advanced error handling beyond basic traps
+### Language Gaps
+- ❌ **Error Handling**: Advanced error handling beyond basic traps (full ON ERROR GOTO/RESUME semantics)
 
 ### Extended Statements
 - ❌ **String Manipulation**: Full string function library
@@ -335,7 +334,7 @@ Recent fixes:
 ### Editor Features
 - ❌ **Full Screen Editor**: Advanced editing capabilities
 - ✅ **Function Keys**: Complete F1-F10 soft key support with default assignments and event trap integration
-- ❌ **Auto Features**: AUTO line numbering, RENUM
+- ❌ **Auto Features**: AUTO line numbering, RENUM (utilities exist in ProgramStore; commands not wired)
 - ❌ **List Formatting**: Advanced LIST options
 
 ### Compatibility Features
@@ -379,7 +378,7 @@ Recent fixes:
 |-----------|------------|---------------|---------|
 | Tokenizer | 100% | ~800 | Stable |
 | Program Store | 95% | ~600 | Stable |
-| Expression Evaluator | 100% | ~1000 | Complete |
+| Expression Evaluator | 98% | ~1000 | Almost Complete |
 | Numeric Engine | 100% | ~1200 | Complete |
 | Runtime System | 100% | ~1500 | Complete |
 | Interpreter Loop | 90% | ~350 | Core Complete |
@@ -391,8 +390,7 @@ Recent fixes:
 
 ### High Priority (Core Language Completion)
 1. **Error Handling Enhancement**: ON ERROR GOTO and RESUME statements beyond basic traps
-3. **Directory Operations**: FILES, KILL, NAME statements for file management
-4. **Advanced Graphics**: GET, PUT operations for sprite/image manipulation
+2. **Advanced Graphics (Graphics GET/PUT)**: Implement full GW-BASIC-compatible block format, array layout, STEP handling, and action verbs (PSET, PRESET, AND, OR, XOR) for graphics PUT/GET
 
 ### Medium Priority (Language Features)
 1. **Time/Date Functions**: TIME$ and DATE$ implementation
@@ -410,8 +408,8 @@ Recent fixes:
 - Limited error handling in expressions
 
 ### Important Issues  
-- Limited numeric formatting options beyond PRINT USING
-- No directory operations (FILES, KILL, NAME)
+ - Limited numeric formatting options beyond PRINT USING
+ - Graphics GET/PUT uses simplified array format and default mode; not yet compatible with GW-BASIC block format
 
 ### Minor Issues
 - Trace output needs improvement
@@ -486,22 +484,20 @@ It supports:
 ## 🔮 Future Roadmap
 
 ### Phase 1: Language Completion (Target: Q4 2025)
-- Complete string function integration with runtime system
-- Implement user-defined functions (DEF FN)
-- Add enhanced error handling (ON ERROR GOTO, RESUME)
-- Add random file I/O capabilities (GET, PUT operations)
+ - Complete string function integration with runtime system
+ - Implement enhanced error handling (ON ERROR GOTO, RESUME)
+ - Flesh out graphics GET/PUT to match GW-BASIC block format
 
 ### Phase 2: I/O and Formatting (Target: Q1 2026)
-- Complete random file I/O system (GET, PUT operations)
-- Add directory operations (FILES, KILL, NAME)
-- Implement time/date functions (TIME$, DATE$)
-- Add graphics drawing capabilities (PSET, LINE, CIRCLE)
+ - Implement time/date functions (TIME$, DATE$)
+ - Improve PRINT USING string pattern coverage
+ - Expand device I/O (e.g., LPRINT) if feasible
 
 ### Phase 3: Advanced Features (Target: Q2 2026)
-- Add graphics support (basic statements)
-- Implement sound capabilities
-- Add event trap system
-- Improve compatibility
+ - Enhance graphics system (sprite/block format compatibility for GET/PUT, palette/attribute nuances, performance)
+ - Implement sound capabilities
+ - Expand event trap system and diagnostics
+ - Improve GW-BASIC compatibility edge cases
 
 ### Phase 4: Polish and Optimization (Target: Q3 2026)
 - Performance optimizations
@@ -514,16 +510,14 @@ It supports:
 The project welcomes contributions in several areas:
 
 **High Impact Areas:**
-- Random file I/O (GET, PUT operations)
-- Error handling enhancement (ON ERROR GOTO, RESUME)
-- Advanced graphics (GET, PUT for sprite manipulation)
-- Directory operations (FILES, KILL, NAME)
+ - Graphics GET/PUT (full GW-BASIC block format and action verbs)
+ - Error handling enhancement (ON ERROR GOTO, RESUME)
+ - Device I/O (Printer/COM) groundwork
 
 **Medium Impact Areas:**
-- Directory operations (FILES, KILL, NAME)
-- Time/Date functions (TIME$, DATE$)
-- PRINT USING string pattern coverage
-- Sound capabilities (SOUND, BEEP)
+ - Time/Date functions (TIME$, DATE$)
+ - PRINT USING string pattern coverage
+ - Sound capabilities (SOUND, BEEP)
 
 **Getting Started:**
 1. Check the `docs/reimplementation_guide.md` for architecture overview
