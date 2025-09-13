@@ -7,3 +7,4 @@ test_string_manager
 test_error_handling
 test_simple_error
 test_string_functions
+test_mem_and_deftype

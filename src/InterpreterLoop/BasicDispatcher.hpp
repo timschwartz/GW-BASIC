@@ -52,6 +52,9 @@ public:
         // Wire up cross-references
         vars.setStringHeap(&strHeap);
         vars.setArrayManager(&arrayManager);
+        // Initialize simulated DOS memory (1 MiB) and DEF SEG
+        this->dosMemory.assign(1u << 20, 0u);
+        this->currentSegment = 0;
         
         // Wire evaluator env to read variables from VariableTable
         env.optionBase = 0;
@@ -105,27 +108,39 @@ public:
             return false;
         };
         
-        // Wire user-defined function calls
+        // Wire function calls: handle a few special built-ins (like PEEK) before user-defined functions
         env.callFunc = [this](const std::string& name, const std::vector<expr::Value>& args, expr::Value& out) -> bool {
-            // Check user-defined functions first
+            // Handle PEEK(address) using current DEF SEG
+            std::string upperName = name;
+            std::transform(upperName.begin(), upperName.end(), upperName.begin(), [](unsigned char c){ return static_cast<char>(std::toupper(c)); });
+            if (upperName == "PEEK") {
+                if (args.size() != 1) {
+                    this->throwBasicError(5, "Illegal function call: PEEK requires one argument", 0);
+                }
+                int32_t ofs = expr::ExpressionEvaluator::toInt16(args[0]);
+                if (ofs < 0 || ofs > 0xFFFF) {
+                    this->throwBasicError(5, "Illegal function call: address out of range", 0);
+                }
+                uint32_t phys = static_cast<uint32_t>(this->currentSegment) * 16u + static_cast<uint32_t>(ofs);
+                if (phys >= this->dosMemory.size()) {
+                    this->throwBasicError(5, "Illegal function call: address out of range", 0);
+                }
+                out = expr::Int16{ static_cast<int16_t>(this->dosMemory[phys]) };
+                return true;
+            }
+
+            // Check user-defined functions next
             if (userFunctionManager.isUserFunction(name)) {
                 try {
-                    // Convert expr::Value arguments to gwbasic::Value
                     std::vector<gwbasic::Value> runtimeArgs;
-                    for (const auto& arg : args) {
-                        runtimeArgs.push_back(this->fromExprValue(arg));
-                    }
-                    
+                    for (const auto& arg : args) runtimeArgs.push_back(this->fromExprValue(arg));
                     gwbasic::Value result;
-                    if (userFunctionManager.callFunction(name, runtimeArgs, result)) {
-                        out = toExprValue(result);
-                        return true;
-                    }
+                    if (userFunctionManager.callFunction(name, runtimeArgs, result)) { out = toExprValue(result); return true; }
                 } catch (const std::exception&) {
-                    // Function call failed - let built-in functions handle it
+                    // fall through
                 }
             }
-            return false; // Not a user function, let built-ins handle it
+            return false; // Let builtin evaluator try
         };
     }
 
@@ -210,6 +225,9 @@ private:
     uint16_t currentLine = 0; // Current line number being executed
     bool testMode = false; // Set to true to avoid waiting for input in tests
     GraphicsContext graphics; // Graphics drawing context
+    // Simulated DOS memory for PEEK/POKE and DEF SEG state
+    std::vector<uint8_t> dosMemory;
+    uint16_t currentSegment = 0;
 
     // Helpers to convert between runtime Value and evaluator Value
     static expr::Value toExprValue(const gwbasic::Value& v) {
@@ -403,8 +421,12 @@ private:
         if (name == "END" || name == "STOP") return 0xFFFF;
         if (name == "INPUT") return doINPUT(b, pos);
         if (name == "LET") return handleLet(b, pos, false);
-        if (name == "DIM") return doDIM(b, pos);
-        if (name == "DEF") return doDEF(b, pos);
+    if (name == "DIM") return doDIM(b, pos);
+    if (name == "DEF") return doDEF(b, pos);
+    if (name == "DEFINT") return doDEFType(b, pos, gwbasic::ScalarType::Int16);
+    if (name == "DEFSNG") return doDEFType(b, pos, gwbasic::ScalarType::Single);
+    if (name == "DEFDBL") return doDEFType(b, pos, gwbasic::ScalarType::Double);
+    if (name == "DEFSTR") return doDEFType(b, pos, gwbasic::ScalarType::String);
         if (name == "READ") return doREAD(b, pos);
         if (name == "DATA") return doDATA(b, pos);
         if (name == "RESTORE") return doRESTORE(b, pos);
@@ -419,7 +441,8 @@ private:
         if (name == "LOAD") return doLOAD(b, pos);
         if (name == "SAVE") return doSAVE(b, pos);
         if (name == "OPEN") return doOPEN(b, pos);
-        if (name == "CLOSE") return doCLOSE(b, pos);
+    if (name == "CLOSE") return doCLOSE(b, pos);
+    if (name == "POKE") return doPOKE(b, pos);
         if (name == "ERROR") return doERROR(b, pos);
         if (name == "RESUME") return doRESUME(b, pos);
         if (name == "KEY") return doKEY(b, pos);
@@ -1478,6 +1501,85 @@ private:
         return readLineNumber(b, pos);
     }
 
+    // Helper: parse letter ranges for DEFxxx (e.g., A-C, M, X-Z)
+    void parseLetterRanges(const std::vector<uint8_t>& b, size_t& pos, const std::function<void(char,char)>& applyRange) {
+        auto parseOne = [&](char& from, char& to)->bool {
+            skipSpaces(b, pos);
+            if (atEnd(b, pos) || !std::isalpha(b[pos])) return false;
+            from = static_cast<char>(std::toupper(b[pos++]));
+            skipSpaces(b, pos);
+            // Accept ASCII '-' or tokenized minus operator
+            bool hasMinus = false;
+            if (!atEnd(b, pos)) {
+                if (b[pos] == '-') {
+                    hasMinus = true;
+                } else if (b[pos] >= 0x80 && tok) {
+                    std::string tname = tok->getTokenName(b[pos]);
+                    if (tname == "-") hasMinus = true;
+                }
+            }
+            if (hasMinus) {
+                ++pos; skipSpaces(b, pos);
+                if (atEnd(b, pos) || !std::isalpha(b[pos])) throw expr::BasicError(2, "Bad DEF type range", pos);
+                to = static_cast<char>(std::toupper(b[pos++]));
+            } else {
+                to = from;
+            }
+            if (from > to) std::swap(from, to);
+            return true;
+        };
+        char f{'A'}, t{'A'};
+        if (!parseOne(f,t)) throw expr::BasicError(2, "Missing letter list", pos);
+        applyRange(f,t);
+        while (true) {
+            skipSpaces(b, pos);
+            if (atEnd(b, pos) || !(
+                b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ",")
+            )) break;
+            ++pos; // consume comma
+            if (!parseOne(f,t)) throw expr::BasicError(2, "Missing letter after comma", pos);
+            applyRange(f,t);
+        }
+    }
+
+    // DEFINT/DEFSNG/DEFDBL/DEFSTR implementation
+    uint16_t doDEFType(const std::vector<uint8_t>& b, size_t& pos, gwbasic::ScalarType type) {
+        skipSpaces(b, pos);
+        parseLetterRanges(b, pos, [&](char from, char to){ this->deftbl.setRange(from, to, type); });
+        // Be defensive: consume any trailing whitespace/tokens up to end-of-statement
+        // so nothing remains to be treated as an implied LET.
+        skipSpaces(b, pos);
+        while (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+            // Allow optional commas in some dialects after the last range; skip safely
+            // Also skip any stray operator tokens that might have been produced by the tokenizer
+            ++pos;
+            skipSpaces(b, pos);
+        }
+        return 0;
+    }
+
+    // POKE addr, value (addr is offset in current DEF SEG)
+    uint16_t doPOKE(const std::vector<uint8_t>& b, size_t& pos) {
+        skipSpaces(b, pos);
+        auto aRes = ev.evaluate(b, pos, env);
+        pos = aRes.nextPos;
+        int32_t ofs = expr::ExpressionEvaluator::toInt16(aRes.value);
+        skipSpaces(b, pos);
+        if (atEnd(b, pos) || !(b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) {
+            throw expr::BasicError(2, "Expected comma in POKE", pos);
+        }
+        ++pos;
+        skipSpaces(b, pos);
+        auto vRes = ev.evaluate(b, pos, env);
+        pos = vRes.nextPos;
+        int32_t val = expr::ExpressionEvaluator::toInt16(vRes.value);
+        if (ofs < 0 || ofs > 0xFFFF) throw expr::BasicError(5, "Illegal function call: address out of range", pos);
+        uint32_t phys = static_cast<uint32_t>(this->currentSegment) * 16u + static_cast<uint32_t>(ofs);
+        if (phys >= this->dosMemory.size()) throw expr::BasicError(5, "Illegal function call: address out of range", pos);
+        this->dosMemory[phys] = static_cast<uint8_t>(val & 0xFF);
+        return 0;
+    }
+
     uint16_t doIF(const std::vector<uint8_t>& b, size_t& pos) {
     skipSpaces(b, pos);
     auto res = ev.evaluate(b, pos, env);
@@ -2288,6 +2390,49 @@ private:
 
         skipSpaces(b, pos);
         logDebug("doDEF:after-skip");
+
+        // First, handle DEF SEG [= expr] form
+        {
+            auto save = pos;
+            std::string word;
+            // Try tokenized first
+            if (!atEnd(b, pos) && b[pos] >= 0x80 && tok) {
+                std::string tname = tok->getTokenName(b[pos]);
+                if (tname == "SEG") {
+                    ++pos;
+                    word = "SEG";
+                }
+            }
+            // Or ASCII SEG
+            if (word.empty()) {
+                auto save2 = pos;
+                while (!atEnd(b, pos) && std::isalpha(b[pos])) {
+                    word.push_back(static_cast<char>(std::toupper(b[pos++])));
+                    if (word.size() > 3) break; // only need to match SEG
+                }
+                if (word != "SEG") { pos = save2; word.clear(); }
+            }
+            if (word == "SEG") {
+                skipSpaces(b, pos);
+                bool hasEq = false;
+                if (!atEnd(b, pos) && (
+                    b[pos] == '=' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "=")
+                )) { hasEq = true; ++pos; }
+                if (hasEq) {
+                    skipSpaces(b, pos);
+                    auto segRes = ev.evaluate(b, pos, env);
+                    pos = segRes.nextPos;
+                    int32_t segVal = expr::ExpressionEvaluator::toInt16(segRes.value);
+                    this->currentSegment = static_cast<uint16_t>(segVal & 0xFFFF);
+                } else {
+                    // DEF SEG with no argument resets to default (segment 0 in our emulation)
+                    this->currentSegment = 0;
+                }
+                return 0;
+            } else {
+                pos = save; // not SEG; continue with DEF FN parsing
+            }
+        }
         
         // Expect FN followed by function name
         std::string fnKeyword;
@@ -2314,7 +2459,7 @@ private:
             }
         }
         
-        // Read function name - should start immediately after FN or contain FN
+    // Read function name - should start immediately after FN or contain FN
     std::string funcName = readIdentifier(b, pos);
     if (funcName.empty()) {
             // Debug: dump next few bytes and token names to diagnose
