@@ -6,6 +6,9 @@
 #include "../ProgramStore/ProgramStore.hpp"
 #include "../Tokenizer/Tokenizer.hpp"
 #include "../Runtime/EventTraps.hpp"
+#include "../Runtime/GWError.hpp"
+#include "../Runtime/RuntimeStack.hpp"
+#include "../ExpressionEvaluator/ExpressionEvaluator.hpp"
 
 InterpreterLoop::InterpreterLoop(std::shared_ptr<ProgramStore> program,
                                  std::shared_ptr<Tokenizer> tokenizer)
@@ -83,8 +86,51 @@ InterpreterLoop::StepResult InterpreterLoop::step() {
 
     uint16_t nextOverride = 0;
     if (handler) {
-        // Handler can throw to signal runtime error
-        nextOverride = handler(tokens, currentLine);
+        try {
+            // Handler can throw to signal runtime error
+            nextOverride = handler(tokens, currentLine);
+        } catch (const gwbasic::GWError& e) {
+            // Handle GW-BASIC runtime error
+            uint16_t errorResult = handleRuntimeError(e);
+            if (errorResult == 0xFFFF) {
+                halted = true;
+                return StepResult::Halted;
+            } else if (errorResult != 0) {
+                // Jump to error handler
+                currentLine = errorResult;
+                if (prog) prog->setCurrentLine(currentLine);
+                return StepResult::Jumped;
+            }
+            // Continue normal execution if error result is 0
+        } catch (const expr::BasicError& e) {
+            // Convert expression evaluator error to GW-BASIC error
+            gwbasic::GWError gwError(e.code, e.what(), currentLine, e.position);
+            uint16_t errorResult = handleRuntimeError(gwError);
+            if (errorResult == 0xFFFF) {
+                halted = true;
+                return StepResult::Halted;
+            } else if (errorResult != 0) {
+                // Jump to error handler
+                currentLine = errorResult;
+                if (prog) prog->setCurrentLine(currentLine);
+                return StepResult::Jumped;
+            }
+            // Continue normal execution if error result is 0
+        } catch (const std::exception& e) {
+            // Convert generic exception to GW-BASIC internal error
+            gwbasic::GWError gwError(gwbasic::ErrorCodes::INTERNAL_ERROR, e.what(), currentLine, 0);
+            uint16_t errorResult = handleRuntimeError(gwError);
+            if (errorResult == 0xFFFF) {
+                halted = true;
+                return StepResult::Halted;
+            } else if (errorResult != 0) {
+                // Jump to error handler
+                currentLine = errorResult;
+                if (prog) prog->setCurrentLine(currentLine);
+                return StepResult::Jumped;
+            }
+            // Continue normal execution if error result is 0
+        }
     }
 
     if (halted) return StepResult::Halted;
@@ -137,4 +183,34 @@ void InterpreterLoop::injectKeyEvent(uint8_t scanCode, bool pressed) {
     if (keyEventCallback) {
         keyEventCallback(scanCode, pressed);
     }
+}
+
+uint16_t InterpreterLoop::handleRuntimeError(const gwbasic::GWError& error) {
+    // Check if we have an active error handler
+    if (runtimeStack && runtimeStack->hasErrorHandler()) {
+        // Set up error information for RESUME
+        gwbasic::ErrFrame frame{};
+        frame.errCode = error.getErrorCode();
+        frame.resumeLine = currentLine;
+        frame.resumeTextPtr = 0; // TODO: Could store position within line if needed
+        frame.errorHandlerLine = runtimeStack->getErrorHandlerLine();
+        frame.trapEnabled = true;
+        
+        // Push error frame onto stack
+        runtimeStack->pushErr(frame);
+        
+        // Jump to error handler
+        uint16_t handlerLine = runtimeStack->getErrorHandlerLine();
+        if (prog && prog->hasLine(handlerLine)) {
+            return handlerLine;
+        } else {
+            // Handler line doesn't exist - disable error handling and fall through to default
+            runtimeStack->disableErrorHandler();
+        }
+    }
+    
+    // No error handler or handler line invalid - use default behavior
+    // For now, just halt the program (could also throw the error)
+    halted = true;
+    return 0xFFFF; // Halt sentinel
 }

@@ -60,3 +60,4 @@ configure.ac~
 configure~
 *.log
 *.trs
+.dirstamp

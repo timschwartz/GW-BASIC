@@ -4,3 +4,5 @@ test_variable_table
 test_array_manager
 test_string_heap
 test_string_manager
+test_error_handling
+test_simple_error

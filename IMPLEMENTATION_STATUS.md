@@ -2,7 +2,7 @@
 
 A comprehensive status overview of the GW-BASIC reimplementation in C++.
 
-**Last Updated:** September 12, 2025  
+**Last Updated:** September 13, 2025  
 **Current Version:** 0.1
 
 ## Summary
@@ -12,12 +12,11 @@ This project includes:
 - ✅ **SCREEN Statement**: Complete implementation with 14 video modes (0-13), dynamic window resizing, graphics mode switching, and text framebuffer overlay for graphics modes
 - ✅ **COLOR Statement**: Complete foreground and background color support with standard 16-color CGA/EGA/VGA palette (colors 0-15 for foreground, 0-7 for background)
 - ✅ **Sequential File I/O**: Complete OPEN, CLOSE, PRINT#, INPUT# implementation with file mode support (INPUT/OUTPUT/APPEND), file number management, and proper tokenizer integration
- - ✅ **Random Access File Support**: OPEN with LEN for custom record lengths, plus FIELD/LSET/RSET mapping and GET/PUT record I/O (file-side complete)
+- ✅ **Random Access File Support**: OPEN with LEN for custom record lengths, plus FIELD/LSET/RSET mapping and GET/PUT record I/O (file-side complete)
 - ✅ **FILES Command**: Implemented extended statement FILES with DOS-style wildcard matching (* and ?) and optional path prefix; outputs matching names via print callback
 - ✅ **KILL Command**: Implemented extended statement KILL for file deletion with proper error handling for non-existent files and directories
 - ✅ **NAME Command**: Implemented extended statement NAME for file renaming with 'oldname AS newname' syntax and comprehensive error handling
-
-This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 95% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, comprehensive event trap handling, full function key support, complete SCREEN statement with graphics mode support and text framebuffer, user-defined function support (DEF FN), complete INPUT/PRINT behavior aligned with GW-BASIC semantics, and fixed OPEN statement LEN parameter support. Recent work added comprehensive function key support (F1-F10) with soft key expansion and event trap integration, unified console and GUI execution through the InterpreterLoop, added extended-statement handling (including SYSTEM), fixed PRINT/PRINT USING parsing at line terminators, implemented full SCREEN statement functionality with 14 video modes, dynamic window resizing, and scaled text overlay for graphics modes, and completed DEF FN user-defined function implementation with proper error handling and line number reporting.
+- ✅ **Error Handling**: Complete ON ERROR GOTO, RESUME, ERROR statement implementation with proper error routing, ERL/ERR variables, and comprehensive error handler managementThis is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 95% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, comprehensive event trap handling, full function key support, complete SCREEN statement with graphics mode support and text framebuffer, user-defined function support (DEF FN), complete INPUT/PRINT behavior aligned with GW-BASIC semantics, fixed OPEN statement LEN parameter support, and comprehensive error handling system. Recent work added comprehensive function key support (F1-F10) with soft key expansion and event trap integration, unified console and GUI execution through the InterpreterLoop, added extended-statement handling (including SYSTEM), fixed PRINT/PRINT USING parsing at line terminators, implemented full SCREEN statement functionality with 14 video modes, dynamic window resizing, and scaled text overlay for graphics modes, completed DEF FN user-defined function implementation with proper error handling and line number reporting, and finalized the complete error handling system with ON ERROR GOTO, RESUME, and ERROR statement implementations.
 
 ## ✅ Completed Components
 
@@ -227,6 +226,7 @@ This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be comp
 - ✅ **Graphics Drawing**: Complete PSET, LINE, CIRCLE implementation with coordinate parsing, color parameter support, proper tokenization handling for parentheses (244), commas (246), and minus operators (232), and integration with GraphicsContext API
 - ✅ **Error Handling Enhancement**: Improved error reporting with proper line number context for syntax errors, ensuring all expression evaluator exceptions are caught and re-thrown with line information
 - ✅ **OPEN Statement LEN Parameter**: Fixed tokenization and parsing issues with LEN parameter syntax, supporting multiple = token formats (0xD1, 0xD2, 0xE5) for robust parsing
+- ✅ **Complete Error Handling**: ON ERROR GOTO and RESUME statement implementation with proper error routing, ERL/ERR variables, ERROR statement simulation, and comprehensive error handler management
 
 **Files**: `src/InterpreterLoop/BasicDispatcher.hpp`, `src/Graphics/` (GraphicsContext.hpp, GraphicsContext.cpp)
 **Recent Enhancements:**
@@ -323,9 +323,6 @@ Recent fixes:
 ## ❌ Not Implemented
 
 ### Language Gaps
-- ❌ **Error Handling**: Advanced error handling beyond basic traps (full ON ERROR GOTO/RESUME semantics)
-
-### Extended Statements
 - ❌ **String Manipulation**: Full string function library
 - ❌ **Advanced Math**: Complex math functions, matrix operations
 - ❌ **Time/Date**: TIME$, DATE$ functions
@@ -362,13 +359,14 @@ Recent fixes:
 - ✅ **LOAD Operations**: Program loading from files
 - ✅ **FOR/NEXT Loops**: Loop execution with various parameters
 
-### Test Status: **All tests passing** (6 runtime tests + 1 array manager test + 1 event traps test = 8 total runtime tests, 376 total assertions)
+### Test Status: **All tests passing** (7 runtime tests + 1 array manager test + 1 event traps test + 1 error handling test = 10 total runtime tests, 425+ total assertions)
 
 **Recent Additions:**
 - ✅ **String Heap Tests**: 105 test assertions covering automatic GC, root provider integration, memory statistics, allocation failure handling
 - ✅ **String Manager Tests**: 120 test assertions covering string operations, temporary pool management, RAII helpers, error conditions
 - ✅ **Array Manager Tests**: 25 test assertions covering array creation, element access/modification, multi-dimensional arrays, bounds checking, and StringRootProvider integration
 - ✅ **Event Traps Tests**: 8 test assertions covering event trap configuration, timer events, key events, error events, and trap enabling/disabling
+- ✅ **Error Handling Tests**: 25 test assertions covering ON ERROR GOTO, RESUME variants, ERL/ERR variables, ERROR statement simulation, RESUME without error validation, and comprehensive error handler management
 - ✅ BasicDispatcher tests for SYSTEM (extended 0xFE) halting semantics and PRINT separator/newline behavior
 - ✅ Regression tests ensuring 0xFFFF halt sentinel propagation prevents spurious syntax errors
 
@@ -389,8 +387,7 @@ Recent fixes:
 ## 🎯 Next Priority Items
 
 ### High Priority (Core Language Completion)
-1. **Error Handling Enhancement**: ON ERROR GOTO and RESUME statements beyond basic traps
-2. **Advanced Graphics (Graphics GET/PUT)**: Implement full GW-BASIC-compatible block format, array layout, STEP handling, and action verbs (PSET, PRESET, AND, OR, XOR) for graphics PUT/GET
+1. **Advanced Graphics (Graphics GET/PUT)**: Implement full GW-BASIC-compatible block format, array layout, STEP handling, and action verbs (PSET, PRESET, AND, OR, XOR) for graphics PUT/GET
 
 ### Medium Priority (Language Features)
 1. **Time/Date Functions**: TIME$ and DATE$ implementation
@@ -405,11 +402,11 @@ Recent fixes:
 ## 🚧 Known Issues
 
 ### Critical Issues
-- Limited error handling in expressions
+- None identified at this time
 
 ### Important Issues  
- - Limited numeric formatting options beyond PRINT USING
- - Graphics GET/PUT uses simplified array format and default mode; not yet compatible with GW-BASIC block format
+- Limited numeric formatting options beyond PRINT USING
+- Graphics GET/PUT uses simplified array format and default mode; not yet compatible with GW-BASIC block format
 
 ### Minor Issues
 - Trace output needs improvement
@@ -479,19 +476,19 @@ It supports:
 - Text display in all graphics modes with automatic character scaling and proper text overlay
 - Complete COLOR statement with 16-color palette support for foreground and background colors
 - **Graphics drawing**: PSET, LINE, CIRCLE statements with coordinate parsing, color support, and proper tokenization handling
+- **Complete error handling**: ON ERROR GOTO, RESUME, ERROR statement implementation with proper error routing, ERL/ERR variables, and comprehensive error handler management
 - **Enhanced error reporting**: Syntax errors now include proper line number information for better debugging
 
 ## 🔮 Future Roadmap
 
 ### Phase 1: Language Completion (Target: Q4 2025)
- - Complete string function integration with runtime system
- - Implement enhanced error handling (ON ERROR GOTO, RESUME)
- - Flesh out graphics GET/PUT to match GW-BASIC block format
+- Complete string function integration with runtime system
+- Flesh out graphics GET/PUT to match GW-BASIC block format
 
 ### Phase 2: I/O and Formatting (Target: Q1 2026)
- - Implement time/date functions (TIME$, DATE$)
- - Improve PRINT USING string pattern coverage
- - Expand device I/O (e.g., LPRINT) if feasible
+- Implement time/date functions (TIME$, DATE$)
+- Improve PRINT USING string pattern coverage
+- Expand device I/O (e.g., LPRINT) if feasible
 
 ### Phase 3: Advanced Features (Target: Q2 2026)
  - Enhance graphics system (sprite/block format compatibility for GET/PUT, palette/attribute nuances, performance)
@@ -510,14 +507,13 @@ It supports:
 The project welcomes contributions in several areas:
 
 **High Impact Areas:**
- - Graphics GET/PUT (full GW-BASIC block format and action verbs)
- - Error handling enhancement (ON ERROR GOTO, RESUME)
- - Device I/O (Printer/COM) groundwork
+- Graphics GET/PUT (full GW-BASIC block format and action verbs)
+- Device I/O (Printer/COM) groundwork
 
 **Medium Impact Areas:**
- - Time/Date functions (TIME$, DATE$)
- - PRINT USING string pattern coverage
- - Sound capabilities (SOUND, BEEP)
+- Time/Date functions (TIME$, DATE$)
+- PRINT USING string pattern coverage
+- Sound capabilities (SOUND, BEEP)
 
 **Getting Started:**
 1. Check the `docs/reimplementation_guide.md` for architecture overview

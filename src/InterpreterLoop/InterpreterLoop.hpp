@@ -11,6 +11,8 @@ class Tokenizer;
 
 namespace gwbasic {
     class EventTrapSystem;
+    class RuntimeStack;
+    class GWError;
 }
 
 /**
@@ -56,6 +58,9 @@ public:
     // Event trap system access
     void setEventTrapSystem(gwbasic::EventTrapSystem* eventTraps) { eventTrapSystem = eventTraps; }
     
+    // Runtime stack access for error handling
+    void setRuntimeStack(gwbasic::RuntimeStack* stack) { runtimeStack = stack; }
+    
     // Event injection
     void injectKeyEvent(uint8_t scanCode, bool pressed);
 
@@ -82,9 +87,11 @@ private:
     StatementHandler handler{};
     KeyEventCallback keyEventCallback{};
     gwbasic::EventTrapSystem* eventTrapSystem{nullptr};
+    gwbasic::RuntimeStack* runtimeStack{nullptr};
 
     uint16_t currentLine{0};
 
     // Helpers
     void traceLine(uint16_t lineNum, const std::vector<uint8_t>& tokens);
+    uint16_t handleRuntimeError(const gwbasic::GWError& error);
 };

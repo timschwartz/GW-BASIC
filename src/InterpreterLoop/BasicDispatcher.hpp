@@ -57,6 +57,29 @@ public:
         env.optionBase = 0;
         env.vars.clear();
         env.getVar = [this](const std::string& name, expr::Value& out) -> bool {
+            // Check for special error variables first
+            if (name == "ERL") {
+                // ERL returns the line number where the last error occurred
+                gwbasic::ErrFrame* errFrame = runtimeStack.topErr();
+                if (errFrame) {
+                    out = expr::Int16{static_cast<int16_t>(errFrame->resumeLine)};
+                } else {
+                    out = expr::Int16{0};
+                }
+                return true;
+            }
+            if (name == "ERR") {
+                // ERR returns the error code of the last error
+                gwbasic::ErrFrame* errFrame = runtimeStack.topErr();
+                if (errFrame) {
+                    out = expr::Int16{static_cast<int16_t>(errFrame->errCode)};
+                } else {
+                    out = expr::Int16{0};
+                }
+                return true;
+            }
+            
+            // Regular variable lookup
             if (auto* slot = vars.tryGet(name)) {
                 if (!slot->isArray) {
                     out = toExprValue(slot->scalar);
@@ -152,6 +175,9 @@ public:
 
     // Access to event trap system
     gwbasic::EventTrapSystem* getEventTrapSystem() { return &eventTraps; }
+    
+    // Access to runtime stack for error handling
+    gwbasic::RuntimeStack* getRuntimeStack() { return &runtimeStack; }
     
     // Access to data manager for program loading
     void resetDataManager() { dataManager.restore(); }
@@ -1867,9 +1893,16 @@ private:
                 skipSpaces(b, pos);
                 uint16_t handlerLine = readLineNumber(b, pos);
                 
-                // Set error trap
-                eventTraps.setErrorTrap(handlerLine);
-                runtimeStack.setErrorHandler(handlerLine);
+                // Set or disable error trap
+                if (handlerLine == 0) {
+                    // ON ERROR GOTO 0 disables error handling
+                    eventTraps.setErrorTrap(0);
+                    runtimeStack.disableErrorHandler();
+                } else {
+                    // Set error trap to specified line
+                    eventTraps.setErrorTrap(handlerLine);
+                    runtimeStack.setErrorHandler(handlerLine);
+                }
                 
                 return 0;
                 
@@ -2425,15 +2458,27 @@ private:
         
         // Trigger error trap if enabled
         if (runtimeStack.hasErrorHandler()) {
-            // Set up error frame
-            gwbasic::ErrFrame frame{};
-            frame.errCode = errorCode;
-            frame.resumeLine = currentLine;
-            frame.resumeTextPtr = 0;
-            runtimeStack.pushErr(frame);
+            uint16_t handlerLine = runtimeStack.getErrorHandlerLine();
+            
+            // Set up error frame - update existing frame instead of pushing new one
+            auto* errFrame = runtimeStack.topErr();
+            if (errFrame) {
+                errFrame->errCode = errorCode;
+                errFrame->resumeLine = currentLine;
+                errFrame->resumeTextPtr = 0;
+            } else {
+                // No existing frame, create a new one
+                gwbasic::ErrFrame frame{};
+                frame.errCode = errorCode;
+                frame.resumeLine = currentLine;
+                frame.resumeTextPtr = 0;
+                frame.errorHandlerLine = handlerLine;
+                frame.trapEnabled = true;
+                runtimeStack.pushErr(frame);
+            }
             
             // Jump to error handler
-            return runtimeStack.getErrorHandlerLine();
+            return handlerLine;
         } else {
             // No error handler - should cause program termination
             throw expr::BasicError(errorCode, "Error", pos);
