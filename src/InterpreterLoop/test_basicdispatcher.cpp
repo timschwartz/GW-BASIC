@@ -251,3 +251,41 @@ TEST_CASE("BasicDispatcher COLOR with expression (foreground and background)", "
     REQUIRE(r == 0);
     REQUIRE(captured.find("COLOR 2,1 - Active\n") != std::string::npos);
 }
+
+TEST_CASE("BasicDispatcher SCREEN 0 (text mode)", "[dispatcher][screen]") {
+    Tokenizer tok;
+    std::string captured;
+    auto printer = [&](const std::string& s){ captured += s; };
+    // No screen callback needed; dispatcher will still print status
+    auto disp = BasicDispatcher(std::make_shared<Tokenizer>(tok), nullptr, printer, nullptr);
+    disp.setTestMode(true);
+    auto stmt = crunchStmt(tok, "SCREEN 0");
+    auto r = disp(stmt);
+    REQUIRE(r == 0);
+    REQUIRE(captured.find("SCREEN 0: Text mode 80x25 - Active\n") != std::string::npos);
+}
+
+TEST_CASE("BasicDispatcher SCREEN 0,1 (optional param) parses cleanly", "[dispatcher][screen]") {
+    Tokenizer tok;
+    std::string captured;
+    auto printer = [&](const std::string& s){ captured += s; };
+    auto disp = BasicDispatcher(std::make_shared<Tokenizer>(tok), nullptr, printer, nullptr);
+    disp.setTestMode(true);
+    auto stmt = crunchStmt(tok, "SCREEN 0,1");
+    auto r = disp(stmt);
+    REQUIRE(r == 0);
+    // No trailing syntax error should occur; verify expected output present
+    REQUIRE(captured.find("SCREEN 0: Text mode 80x25 - Active\n") != std::string::npos);
+}
+
+TEST_CASE("BasicDispatcher SCREEN with null parameters parses cleanly", "[dispatcher][screen]") {
+    Tokenizer tok;
+    std::string captured;
+    auto printer = [&](const std::string& s){ captured += s; };
+    auto disp = BasicDispatcher(std::make_shared<Tokenizer>(tok), nullptr, printer, nullptr);
+    disp.setTestMode(true);
+    auto stmt = crunchStmt(tok, "SCREEN 0,,,");
+    auto r = disp(stmt);
+    REQUIRE(r == 0);
+    REQUIRE(captured.find("SCREEN 0: Text mode 80x25 - Active\n") != std::string::npos);
+}

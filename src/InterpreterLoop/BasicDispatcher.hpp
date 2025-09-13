@@ -2830,6 +2830,33 @@ private:
                 break; // End of parameter list
             }
         }
+
+        // Defensively consume any trailing tokens up to end-of-statement so
+        // nothing remains to be misinterpreted as a new statement in
+        // immediate mode. This mirrors COLOR/WIDTH cleanup logic.
+        skipSpaces(b, pos);
+        while (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+            uint8_t t = b[pos];
+            if (t == '"') {
+                // Skip string literal
+                ++pos;
+                while (!atEnd(b, pos) && b[pos] != '"' && b[pos] != 0x00) ++pos;
+                if (!atEnd(b, pos) && b[pos] == '"') ++pos;
+            } else if (t == 0x11) {
+                // Integer constant token (0x11 LL HH)
+                pos += 3;
+            } else if (t == 0x1D) {
+                // Single precision float (0x1D + 4 bytes)
+                pos += 5;
+            } else if (t == 0x1F) {
+                // Double precision float (0x1F + 8 bytes)
+                pos += 9;
+            } else {
+                // Any other token/operator/identifier; consume one byte
+                ++pos;
+            }
+            skipSpaces(b, pos);
+        }
         
         // Execute SCREEN command based on mode
         return executeScreenMode(mode, params);
