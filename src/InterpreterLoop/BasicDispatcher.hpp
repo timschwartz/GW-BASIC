@@ -12,6 +12,7 @@
 #include <iomanip>
 #include <filesystem>
 #include <algorithm>
+#include <system_error>
 
 #include "../Tokenizer/Tokenizer.hpp"
 #include "../ProgramStore/ProgramStore.hpp"
@@ -547,10 +548,116 @@ private:
         return 0;
     }
 
-    // NAME oldname$ AS newname$ (placeholder for now)
+    // NAME oldname$ AS newname$
     uint16_t doNAME(const std::vector<uint8_t>& b, size_t& pos) {
-        // TODO: Implement NAME command for file renaming
-        this->throwBasicError(5, "Illegal function call: NAME not yet implemented", pos);
+        using namespace std;
+        namespace fs = std::filesystem;
+
+        // Parse oldname expression (required)
+        skipSpaces(b, pos);
+        if (atEnd(b, pos) || b[pos] == ':' || b[pos] == 0x00) {
+            this->throwBasicError(2, "Missing filename in NAME statement", pos);
+        }
+
+        auto oldnameRes = ev.evaluate(b, pos, env);
+        pos = oldnameRes.nextPos;
+        
+        string oldname;
+        visit([&](auto&& x){
+            using T = decay_t<decltype(x)>;
+            if constexpr (is_same_v<T, expr::Str>) {
+                oldname = x.v;
+            } else {
+                // In GW-BASIC, filename must be a string
+                this->throwBasicError(13, "Type mismatch: filename must be string", pos);
+            }
+        }, oldnameRes.value);
+
+        skipSpaces(b, pos);
+        
+        // Expect AS keyword (tokenized or ASCII)
+        bool hasAs = false;
+        if (!atEnd(b, pos)) {
+            uint8_t t = b[pos];
+            if (t >= 0x80 && tok && tok->getTokenName(t) == "AS") {
+                ++pos;
+                hasAs = true;
+            } else if (t >= 0x20 && t < 0x80) {
+                // Try ASCII "AS"
+                auto save = pos;
+                string asWord;
+                for (int i = 0; i < 2 && !atEnd(b, pos) && b[pos] >= 0x20 && b[pos] < 0x80; ++i) {
+                    asWord.push_back(static_cast<char>(std::toupper(b[pos++])));
+                }
+                if (asWord == "AS") hasAs = true; else pos = save;
+            }
+        }
+        
+        if (!hasAs) {
+            this->throwBasicError(2, "Expected AS in NAME statement", pos);
+        }
+        
+        skipSpaces(b, pos);
+        
+        // Parse newname expression (required)
+        if (atEnd(b, pos) || b[pos] == ':' || b[pos] == 0x00) {
+            this->throwBasicError(2, "Missing new filename in NAME statement", pos);
+        }
+
+        auto newnameRes = ev.evaluate(b, pos, env);
+        pos = newnameRes.nextPos;
+        
+        string newname;
+        visit([&](auto&& x){
+            using T = decay_t<decltype(x)>;
+            if constexpr (is_same_v<T, expr::Str>) {
+                newname = x.v;
+            } else {
+                // In GW-BASIC, filename must be a string
+                this->throwBasicError(13, "Type mismatch: filename must be string", pos);
+            }
+        }, newnameRes.value);
+
+        if (oldname.empty()) {
+            this->throwBasicError(2, "Empty old filename in NAME statement", pos);
+        }
+        
+        if (newname.empty()) {
+            this->throwBasicError(2, "Empty new filename in NAME statement", pos);
+        }
+
+        // Normalize path separators
+        for (char& c : oldname) { if (c == '\\') c = '/'; }
+        for (char& c : newname) { if (c == '\\') c = '/'; }
+
+        // Attempt to rename the file
+        try {
+            if (!fs::exists(oldname)) {
+                this->throwBasicError(53, "File not found", pos);
+            }
+            
+            if (fs::exists(newname)) {
+                this->throwBasicError(58, "File already exists", pos);
+            }
+            
+            fs::rename(oldname, newname);
+            
+        } catch (const fs::filesystem_error& e) {
+            // Map filesystem errors to appropriate GW-BASIC error codes
+            auto ec = e.code();
+            if (ec == errc::no_such_file_or_directory) {
+                this->throwBasicError(53, "File not found", pos);
+            } else if (ec == errc::file_exists || ec == errc::directory_not_empty) {
+                this->throwBasicError(58, "File already exists", pos);
+            } else if (ec == errc::permission_denied || ec == errc::operation_not_permitted) {
+                this->throwBasicError(70, "Permission denied", pos);
+            } else {
+                this->throwBasicError(70, "Permission denied", pos);
+            }
+        } catch (const std::exception&) {
+            this->throwBasicError(70, "Permission denied", pos);
+        }
+
         return 0;
     }
 

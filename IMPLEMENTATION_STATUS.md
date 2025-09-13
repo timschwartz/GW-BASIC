@@ -14,6 +14,7 @@ This project - ✅ **SAVE**: Basic file I/O for program storage
  - ✅ **Random Access File Support**: OPEN with LEN for custom record lengths, plus FIELD/LSET/RSET mapping and GET/PUT record I/O
 - ✅ **FILES Command**: Implemented extended statement FILES with DOS-style wildcard matching (* and ?) and optional path prefix; outputs matching names via print callback
 - ✅ **KILL Command**: Implemented extended statement KILL for file deletion with proper error handling for non-existent files and directories
+- ✅ **NAME Command**: Implemented extended statement NAME for file renaming with 'oldname AS newname' syntax and comprehensive error handling
 
 This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 95% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, comprehensive event trap handling, full function key support, complete SCREEN statement with graphics mode support and text framebuffer, user-defined function support (DEF FN), complete INPUT/PRINT behavior aligned with GW-BASIC semantics, and fixed OPEN statement LEN parameter support. Recent work added comprehensive function key support (F1-F10) with soft key expansion and event trap integration, unified console and GUI execution through the InterpreterLoop, added extended-statement handling (including SYSTEM), fixed PRINT/PRINT USING parsing at line terminators, implemented full SCREEN statement functionality with 14 video modes, dynamic window resizing, and scaled text overlay for graphics modes, and completed DEF FN user-defined function implementation with proper error handling and line number reporting.
 
@@ -241,6 +242,7 @@ This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be comp
 - **NEW**: Complete graphics drawing implementation with doPSET, doLINE, doCIRCLE supporting coordinate parsing, color parameters, and proper token handling for parentheses (244), commas (246), closing parentheses (245), and minus operators (232)
 - **NEW**: Implemented FILES extended statement with path splitting, case-insensitive wildcard matching, and stable sorted output
 - **NEW**: Implemented KILL extended statement for file deletion with filesystem error handling and proper GW-BASIC error codes
+- **NEW**: Implemented NAME extended statement for file renaming with AS keyword parsing and comprehensive error handling for file conflicts
 
 ### User Interface (90% Complete)
 - ✅ **SDL3 Integration**: Modern graphics framework for cross-platform support
