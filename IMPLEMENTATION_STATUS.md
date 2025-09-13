@@ -252,6 +252,7 @@ This project includes:
 - **NEW**: Implemented FILES extended statement with path splitting, case-insensitive wildcard matching, and stable sorted output
 - **NEW**: Implemented KILL extended statement for file deletion with filesystem error handling and proper GW-BASIC error codes
 - **NEW**: Implemented NAME extended statement for file renaming with AS keyword parsing and comprehensive error handling for file conflicts
+ - **NEW**: Improved COLOR statement parsing: tokenizer-aware comma handling, optional border argument parsed (ignored for compatibility), and trailing token consumption to avoid spurious syntax errors in immediate mode
 
 ### User Interface (90% Complete)
 - ✅ **SDL3 Integration**: Modern graphics framework for cross-platform support
@@ -322,6 +323,7 @@ Recent fixes:
 - ✅ **Text Framebuffer**: Scaled text overlay system for graphics modes with automatic character scaling based on resolution
 - ✅ **Graphics Infrastructure**: SDL3-based pixel buffer management with separate rendering paths for text and graphics modes
 - ✅ **COLOR Statement**: Complete implementation with foreground and background color support (0-15 foreground, 0-7 background) using standard CGA/EGA/VGA 16-color palette
+  - Border argument is parsed for compatibility and ignored; tokenizer-aware commas supported; immediate-mode handler consumes trailing tokens to prevent stray syntax errors
 - ✅ **Graphics Drawing**: Complete PSET, LINE, CIRCLE implementation with coordinate parsing, color support, and proper tokenization handling
 - ✅ **GraphicsContext**: Full graphics drawing API with Bresenham line algorithm, midpoint circle algorithm, and SDL3 pixel buffer integration
 - ⚠️ **Advanced Graphics**: GET, PUT statements for sprite/image manipulation

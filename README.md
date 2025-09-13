@@ -144,8 +144,3 @@ RUN
 ## Development
 
 The codebase is organized into modular components that can be developed and tested independently. Each major component has its own unit tests and example programs.
-
-## License
-
-[Add license information here]
-

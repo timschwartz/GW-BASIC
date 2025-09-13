@@ -159,3 +159,95 @@ TEST_CASE("BasicDispatcher SYSTEM statement halts program", "[dispatcher]") {
     auto r = disp(stmt);
     REQUIRE(r == 0xFFFF);
 }
+
+TEST_CASE("BasicDispatcher COLOR foreground only", "[dispatcher][color]") {
+    Tokenizer tok;
+    std::string captured;
+    auto printer = [&](const std::string& s){ captured += s; };
+    auto disp = BasicDispatcher(std::make_shared<Tokenizer>(tok), nullptr, printer, nullptr,
+                                nullptr, // screen
+                                [](int /*fg*/, int /*bg*/){ return true; });
+    disp.setTestMode(true);
+    auto stmt = crunchStmt(tok, "COLOR 15");
+    auto r = disp(stmt);
+    REQUIRE(r == 0);
+    REQUIRE(captured.find("COLOR 15 - Active\n") != std::string::npos);
+}
+
+TEST_CASE("BasicDispatcher COLOR foreground and background", "[dispatcher][color]") {
+    Tokenizer tok;
+    std::string captured;
+    auto printer = [&](const std::string& s){ captured += s; };
+    auto disp = BasicDispatcher(std::make_shared<Tokenizer>(tok), nullptr, printer, nullptr,
+                                nullptr, // screen
+                                [](int /*fg*/, int /*bg*/){ return true; });
+    disp.setTestMode(true);
+    auto stmt = crunchStmt(tok, "COLOR 2,7");
+    auto r = disp(stmt);
+    REQUIRE(r == 0);
+    REQUIRE(captured.find("COLOR 2,7 - Active\n") != std::string::npos);
+}
+
+TEST_CASE("BasicDispatcher COLOR with border ignored", "[dispatcher][color]") {
+    Tokenizer tok;
+    std::string captured;
+    auto printer = [&](const std::string& s){ captured += s; };
+    auto disp = BasicDispatcher(std::make_shared<Tokenizer>(tok), nullptr, printer, nullptr,
+                                nullptr, // screen
+                                [](int /*fg*/, int /*bg*/){ return true; });
+    disp.setTestMode(true);
+    auto stmt = crunchStmt(tok, "COLOR 3,0,5");
+    auto r = disp(stmt);
+    REQUIRE(r == 0);
+    // Border should be ignored in message
+    REQUIRE(captured.find("COLOR 3,0 - Active\n") != std::string::npos);
+}
+
+TEST_CASE("BasicDispatcher COLOR invalid ranges error", "[dispatcher][color]") {
+    Tokenizer tok;
+    // Capture error via dual reporting; the dispatcher throws BasicError
+    auto disp = BasicDispatcher(std::make_shared<Tokenizer>(tok), nullptr,
+                                nullptr, nullptr,
+                                nullptr,
+                                [](int /*fg*/, int /*bg*/){ return true; });
+    disp.setTestMode(true);
+    // Foreground out of range
+    auto stmt1 = crunchStmt(tok, "COLOR 16");
+    REQUIRE_THROWS_AS(disp(stmt1), expr::BasicError);
+    // Background out of range
+    auto stmt2 = crunchStmt(tok, "COLOR 1,8");
+    REQUIRE_THROWS_AS(disp(stmt2), expr::BasicError);
+    // Border out of range
+    auto stmt3 = crunchStmt(tok, "COLOR 1,0,99");
+    REQUIRE_THROWS_AS(disp(stmt3), expr::BasicError);
+}
+
+TEST_CASE("BasicDispatcher COLOR with expression (foreground only)", "[dispatcher][color]") {
+    Tokenizer tok;
+    std::string captured;
+    auto printer = [&](const std::string& s){ captured += s; };
+    auto disp = BasicDispatcher(std::make_shared<Tokenizer>(tok), nullptr, printer, nullptr,
+                                nullptr,
+                                [](int /*fg*/, int /*bg*/){ return true; });
+    disp.setTestMode(true);
+    // 10+5 evaluates to 15
+    auto stmt = crunchStmt(tok, "COLOR 10+5");
+    auto r = disp(stmt);
+    REQUIRE(r == 0);
+    REQUIRE(captured.find("COLOR 15 - Active\n") != std::string::npos);
+}
+
+TEST_CASE("BasicDispatcher COLOR with expression (foreground and background)", "[dispatcher][color]") {
+    Tokenizer tok;
+    std::string captured;
+    auto printer = [&](const std::string& s){ captured += s; };
+    auto disp = BasicDispatcher(std::make_shared<Tokenizer>(tok), nullptr, printer, nullptr,
+                                nullptr,
+                                [](int /*fg*/, int /*bg*/){ return true; });
+    disp.setTestMode(true);
+    // 1+1 -> 2 (fg), 3-2 -> 1 (bg)
+    auto stmt = crunchStmt(tok, "COLOR 1+1, 3-2");
+    auto r = disp(stmt);
+    REQUIRE(r == 0);
+    REQUIRE(captured.find("COLOR 2,1 - Active\n") != std::string::npos);
+}

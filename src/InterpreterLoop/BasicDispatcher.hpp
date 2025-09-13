@@ -2946,11 +2946,15 @@ private:
         
         skipSpaces(b, pos);
         
-        int16_t foreground = -1;  // -1 means no change
-        int16_t background = -1;  // -1 means no change
+    int16_t foreground = -1;  // -1 means no change
+    int16_t background = -1;  // -1 means no change
+    int16_t /*border*/ border = -1; // parsed but ignored
         
         // Parse foreground color (optional)
-        if (!atEnd(b, pos) && b[pos] != ',' && b[pos] != 0xF5 && b[pos] != ':' && b[pos] != 0x00) {
+        if (!atEnd(b, pos) && !(
+                b[pos] == ',' ||
+                (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ",") ||
+                b[pos] == ':' || b[pos] == 0x00)) {
             auto res = ev.evaluate(b, pos, env);
             pos = res.nextPos;
             foreground = expr::ExpressionEvaluator::toInt16(res.value);
@@ -2965,12 +2969,12 @@ private:
         skipSpaces(b, pos);
         
         // Check for comma (background parameter)
-        if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) { // 0xF5 is tokenized comma
+        if (!atEnd(b, pos) && (b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) {
             ++pos; // consume comma
             skipSpaces(b, pos);
             
             // Parse background color (optional)
-            if (!atEnd(b, pos) && b[pos] != ',' && b[pos] != 0xF5 && b[pos] != ':' && b[pos] != 0x00) {
+            if (!atEnd(b, pos) && !(b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ",")) && b[pos] != ':' && b[pos] != 0x00) {
                 auto res = ev.evaluate(b, pos, env);
                 pos = res.nextPos;
                 background = expr::ExpressionEvaluator::toInt16(res.value);
@@ -2981,8 +2985,52 @@ private:
                     return 0;
                 }
             }
+
+            // Optional border parameter (ignored). Consume if present to avoid trailing tokens.
+            skipSpaces(b, pos);
+            if (!atEnd(b, pos) && (b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) {
+                ++pos; // consume comma before border
+                skipSpaces(b, pos);
+                if (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+                    auto res = ev.evaluate(b, pos, env);
+                    pos = res.nextPos;
+                    border = expr::ExpressionEvaluator::toInt16(res.value);
+                    // Validate border range defensively (0-15)
+                    if (border < 0 || border > 15) {
+                        throwBasicError(5, "Illegal function call: Invalid border color " + std::to_string(border), pos);
+                        return 0;
+                    }
+                }
+            }
         }
         
+        // Eat trailing tokens defensively up to end-of-statement. This prevents
+        // any leftover separators or tokens from being misinterpreted as new
+        // statements in immediate mode.
+        skipSpaces(b, pos);
+        while (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+            uint8_t t = b[pos];
+            if (t == '"') {
+                // Skip string literal
+                ++pos;
+                while (!atEnd(b, pos) && b[pos] != '"' && b[pos] != 0x00) ++pos;
+                if (!atEnd(b, pos) && b[pos] == '"') ++pos;
+            } else if (t == 0x11) {
+                // Integer constant token
+                pos += 3;
+            } else if (t == 0x1D) {
+                // Single precision float token
+                pos += 5;
+            } else if (t == 0x1F) {
+                // Double precision float token
+                pos += 9;
+            } else {
+                // Any other token/operator/identifier; consume one byte
+                ++pos;
+            }
+            skipSpaces(b, pos);
+        }
+
         // Execute COLOR command
         return executeColorChange(foreground, background);
     }
