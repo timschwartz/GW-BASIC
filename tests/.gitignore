@@ -6,3 +6,4 @@ test_string_heap
 test_string_manager
 test_error_handling
 test_simple_error
+test_string_functions

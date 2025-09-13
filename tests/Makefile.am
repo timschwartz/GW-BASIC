@@ -8,7 +8,7 @@ if HAVE_CATCH2
 AM_CXXFLAGS = $(CATCH2_CFLAGS)
 LDADD = $(CATCH2_LIBS)
 
-check_PROGRAMS = test_variable_table test_runtime_stack test_string_heap test_string_manager test_array_manager test_event_traps test_error_handling test_simple_error
+check_PROGRAMS = test_variable_table test_runtime_stack test_string_heap test_string_manager test_array_manager test_event_traps test_error_handling test_simple_error test_string_functions
 
 test_variable_table_SOURCES = test_variable_table.cpp \
 	$(top_srcdir)/src/Runtime/VariableTable.hpp \
@@ -111,6 +111,14 @@ test_simple_error_SOURCES = test_simple_error.cpp \
 	$(top_srcdir)/src/NumericEngine/MBFFormat.cpp \
 	$(top_srcdir)/src/Graphics/GraphicsContext.hpp \
 	$(top_srcdir)/src/Graphics/GraphicsContext.cpp
+
+test_string_functions_SOURCES = test_string_functions.cpp \
+	$(top_srcdir)/src/Runtime/StringFunctions.hpp \
+	$(top_srcdir)/src/Runtime/StringFunctions.cpp \
+	$(top_srcdir)/src/Runtime/StringManager.hpp \
+	$(top_srcdir)/src/Runtime/StringHeap.hpp \
+	$(top_srcdir)/src/Runtime/StringTypes.hpp \
+	$(top_srcdir)/src/Runtime/Value.hpp
 
 TESTS = $(check_PROGRAMS)
 endif

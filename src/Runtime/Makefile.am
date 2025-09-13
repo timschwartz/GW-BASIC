@@ -13,6 +13,8 @@ libruntime_la_SOURCES = \
     FileManager.cpp \
     FileManager.hpp \
     RuntimeStack.hpp \
+    StringFunctions.cpp \
+    StringFunctions.hpp \
     StringHeap.hpp \
     StringManager.hpp \
     StringTypes.hpp \
