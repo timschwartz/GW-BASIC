@@ -153,7 +153,8 @@ public:
             [this](const std::string& prompt) -> std::string { return getInput(prompt); },
             [this](int mode) -> bool { return changeScreenMode(mode); },
             [this](int foreground, int background) -> bool { return changeColor(foreground, background); },
-            [this]() -> uint8_t* { return getGraphicsBuffer(); });
+            [this]() -> uint8_t* { return getGraphicsBuffer(); },
+            [this](int columns) -> bool { return changeWidth(columns); });
         
         // Connect event trap system between interpreter and dispatcher
         interpreter->setEventTrapSystem(dispatcher->getEventTrapSystem());
@@ -306,6 +307,24 @@ public:
         // The color change will take effect for new text printed
         
         return changed;
+    }
+
+    // Public method to change text width (called by WIDTH statement)
+    bool changeWidth(int columns) {
+        if (!(columns == 40 || columns == 80 || columns == 132)) {
+            return false;
+        }
+        // Update columns; adjust window size only in text mode
+        cols = columns;
+        if (!graphicsMode) {
+            screenWidth = cols * CHAR_W;
+            screenHeight = rows * CHAR_H;
+            if (window) {
+                SDL_SetWindowSize(window, screenWidth, screenHeight);
+            }
+        }
+        clearScreen();
+        return true;
     }
     
     void run() {
@@ -1464,7 +1483,8 @@ int runConsoleMode(int argc, char* argv[]) {
             
             return true;
         },
-        nullptr);  // graphics buffer callback (not supported in console mode)
+        nullptr,  // graphics buffer callback (not supported in console mode)
+        [&](int /*columns*/) -> bool { return true; }); // width callback (no-op in console mode)
     
     // Create InterpreterLoop for proper program execution
     auto interpreter = std::make_unique<InterpreterLoop>(programStore, tokenizer);

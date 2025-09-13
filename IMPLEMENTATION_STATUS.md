@@ -11,6 +11,7 @@ This project includes:
  - ✅ **SAVE**: Basic file I/O for program storage
 - ✅ **SCREEN Statement**: Complete implementation with 14 video modes (0-13), dynamic window resizing, graphics mode switching, and text framebuffer overlay for graphics modes
 - ✅ **COLOR Statement**: Complete foreground and background color support with standard 16-color CGA/EGA/VGA palette (colors 0-15 for foreground, 0-7 for background)
+- ✅ **WIDTH Statement**: Text column width control (supports 40/80/132); updates text mode layout and resizes SDL window appropriately in GUI mode; safe no-op in console mode
 - ✅ **Sequential File I/O**: Complete OPEN, CLOSE, PRINT#, INPUT# implementation with file mode support (INPUT/OUTPUT/APPEND), file number management, and proper tokenizer integration
 - ✅ **Random Access File Support**: OPEN with LEN for custom record lengths, plus FIELD/LSET/RSET mapping and GET/PUT record I/O (file-side complete)
 - ✅ **FILES Command**: Implemented extended statement FILES with DOS-style wildcard matching (* and ?) and optional path prefix; outputs matching names via print callback
@@ -235,6 +236,7 @@ This project includes:
 - ✅ **Complete Error Handling**: ON ERROR GOTO and RESUME statement implementation with proper error routing, ERL/ERR variables, ERROR statement simulation, and comprehensive error handler management
  - ✅ NEW: **DEF SEG / PEEK / POKE**: Added simple memory model (1 MiB) with current segment tracking; PEEK and POKE operate on current segment offset, DEF SEG with or without = supported
  - ✅ NEW: **DEFINT/DEFSNG/DEFDBL/DEFSTR**: Letter-range parsing (e.g., A-C, M, X-Z) updates DefaultTypeTable for implicit variable typing
+ - ✅ NEW: **WIDTH Statement**: Parses WIDTH n; validates allowed columns (40, 80, 132); invokes UI width callback; throws "Illegal function call" on invalid values
 
 **Files**: `src/InterpreterLoop/BasicDispatcher.hpp`, `src/Graphics/` (GraphicsContext.hpp, GraphicsContext.cpp)
 **Recent Enhancements:**
@@ -253,6 +255,7 @@ This project includes:
 - **NEW**: Implemented KILL extended statement for file deletion with filesystem error handling and proper GW-BASIC error codes
 - **NEW**: Implemented NAME extended statement for file renaming with AS keyword parsing and comprehensive error handling for file conflicts
  - **NEW**: Improved COLOR statement parsing: tokenizer-aware comma handling, optional border argument parsed (ignored for compatibility), and trailing token consumption to avoid spurious syntax errors in immediate mode
+ - **NEW**: Added WIDTH statement handling with callback wiring and tokenization-aware parsing
 
 ### User Interface (90% Complete)
 - ✅ **SDL3 Integration**: Modern graphics framework for cross-platform support
@@ -281,6 +284,7 @@ This project includes:
 - SDL3-based pixel buffer management with separate rendering paths for text mode and graphics mode with text overlay
 - Scaled character rendering using bitmap font data with proper bounds checking and background support
 - Graphics infrastructure with setScreenMode(), renderGraphics(), renderTextOverlay(), and renderCharScaled() functions
+ - WIDTH integration: changeWidth() adjusts text columns (40/80/132) and resizes SDL window when in text mode; ignored safely in console builds
 
 ## ⚠️ Partially Implemented
 
@@ -381,6 +385,7 @@ Recent fixes:
 - ✅ **String Functions Tests**: 75+ test assertions covering integrated string function system with StringFunctionProcessor, proper memory management, expression-runtime conversion, and comprehensive function call interface
 - ✅ BasicDispatcher tests for SYSTEM (extended 0xFE) halting semantics and PRINT separator/newline behavior
 - ✅ Regression tests ensuring 0xFFFF halt sentinel propagation prevents spurious syntax errors
+ - ✅ WIDTH tests: validate WIDTH 40/80 success cases and invalid width error handling
 
 ## 📊 Completion Estimates
 
@@ -490,6 +495,7 @@ It supports:
 - **Graphics drawing**: PSET, LINE, CIRCLE statements with coordinate parsing, color support, and proper tokenization handling
 - **Complete error handling**: ON ERROR GOTO, RESUME, ERROR statement implementation with proper error routing, ERL/ERR variables, and comprehensive error handler management
 - **Enhanced error reporting**: Syntax errors now include proper line number information for better debugging
+ - WIDTH statement to switch text columns among 40, 80, or 132 (GUI resizes window accordingly in text mode)
 
 ## 🔮 Future Roadmap
 

@@ -45,10 +45,11 @@ public:
     using InputCallback = std::function<std::string(const std::string&)>; // prompt -> input
     using ScreenModeCallback = std::function<bool(int)>; // mode -> success
     using ColorCallback = std::function<bool(int, int)>; // foreground, background -> success
+    using WidthCallback = std::function<bool(int)>; // columns -> success
     using GraphicsBufferCallback = std::function<uint8_t*()>; // get graphics pixel buffer
     
-    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr, ScreenModeCallback screenCb = nullptr, ColorCallback colorCb = nullptr, GraphicsBufferCallback graphicsBufCb = nullptr)
-        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), fileManager(), userFunctionManager(&strHeap, tok), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb), colorCallback(colorCb), graphicsBufferCallback(graphicsBufCb), graphics() {
+    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr, ScreenModeCallback screenCb = nullptr, ColorCallback colorCb = nullptr, GraphicsBufferCallback graphicsBufCb = nullptr, WidthCallback widthCb = nullptr)
+        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), fileManager(), userFunctionManager(&strHeap, tok), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb), colorCallback(colorCb), graphicsBufferCallback(graphicsBufCb), widthCallback(widthCb), graphics() {
         // Wire up cross-references
         vars.setStringHeap(&strHeap);
         vars.setArrayManager(&arrayManager);
@@ -222,6 +223,7 @@ private:
     ScreenModeCallback screenModeCallback;
     ColorCallback colorCallback;
     GraphicsBufferCallback graphicsBufferCallback;
+    WidthCallback widthCallback;
     uint16_t currentLine = 0; // Current line number being executed
     bool testMode = false; // Set to true to avoid waiting for input in tests
     GraphicsContext graphics; // Graphics drawing context
@@ -449,6 +451,7 @@ private:
         if (name == "TIMER") return doTIMER(b, pos);
         if (name == "SCREEN") return doSCREEN(b, pos);
         if (name == "COLOR") return doCOLOR(b, pos);
+        if (name == "WIDTH") return doWIDTH(b, pos);
         if (name == "PSET") return doPSET(b, pos);
         if (name == "PRESET") return doPRESET(b, pos);
         if (name == "LINE") return doLINE(b, pos);
@@ -3065,6 +3068,52 @@ private:
             printCallback(message);
         }
         
+        return 0;
+    }
+
+    // WIDTH columns
+    uint16_t doWIDTH(const std::vector<uint8_t>& b, size_t& pos) {
+        // Syntax: WIDTH n   (supported: 40, 80, 132). Other WIDTH forms are not yet implemented.
+        skipSpaces(b, pos);
+        if (atEnd(b, pos) || b[pos] == ':' || b[pos] == 0x00) {
+            throwBasicError(5, "Missing width parameter", pos);
+        }
+
+        auto res = ev.evaluate(b, pos, env);
+        pos = res.nextPos;
+        int16_t cols = expr::ExpressionEvaluator::toInt16(res.value);
+
+        // Validate supported widths
+        if (!(cols == 40 || cols == 80 || cols == 132)) {
+            throwBasicError(5, "Illegal function call: Invalid width " + std::to_string(cols), pos);
+            return 0;
+        }
+
+        // Consume trailing tokens to end-of-statement defensively
+        skipSpaces(b, pos);
+        while (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+            // Skip any stray tokens
+            ++pos;
+            skipSpaces(b, pos);
+        }
+
+        return executeWidthChange(cols);
+    }
+
+    uint16_t executeWidthChange(int16_t cols) {
+        bool success = true;
+        if (widthCallback) {
+            success = widthCallback(cols);
+        }
+        if (!success) {
+            throwBasicError(5, "Illegal function call: Could not set width", 0);
+            return 0;
+        }
+
+        if (printCallback) {
+            std::string msg = "WIDTH " + std::to_string(cols) + " - Active\n";
+            printCallback(msg);
+        }
         return 0;
     }
 
