@@ -556,6 +556,9 @@ ExpressionEvaluator::OpInfo ExpressionEvaluator::peekOperator(const std::vector<
         if (tokenName == ">") return {">", 40, 41, false};
         if (tokenName == "=") return {"=", 40, 41, false};
         if (tokenName == "<") return {"<", 40, 41, false};
+        if (tokenName == "<>") return {"<>", 40, 41, false};
+        if (tokenName == "<=") return {"<=", 40, 41, false};
+        if (tokenName == ">=") return {">=", 40, 41, false};
         if (tokenName == "+") return {"+", 50, 51, false};
         if (tokenName == "-") return {"-", 50, 51, false};
         if (tokenName == "*") return {"*", 60, 61, false};
@@ -826,7 +829,12 @@ Value ExpressionEvaluator::parseExpression(const std::vector<uint8_t>& b, size_t
 
         // consume operator
         if (op.op == "<>" || op.op == "<=" || op.op == ">=") {
-            pos += 2;
+            // Check if it's a tokenized operator (single byte) or ASCII sequence (2 bytes)
+            if (pos < b.size() && b[pos] >= 0x80 && tokenizer && tokenizer->getTokenName(b[pos]) == op.op) {
+                pos += 1; // Tokenized operator is single byte
+            } else {
+                pos += 2; // ASCII sequence
+            }
         } else if (op.op == "AND" || op.op == "OR" || op.op == "XOR" || op.op == "EQV" || op.op == "IMP" || op.op == "MOD") {
             // Check if it's a tokenized operator (single byte) or ASCII word
             if (pos < b.size() && b[pos] >= 0x80 && tokenizer && tokenizer->getTokenName(b[pos]) == op.op) {
@@ -844,15 +852,34 @@ Value ExpressionEvaluator::parseExpression(const std::vector<uint8_t>& b, size_t
 
         // Apply operator
         if (isComparison(op.op)) {
-            double a = toDouble(lhs);
-            double c = toDouble(rhs);
             bool res = false;
-            if (op.op == "=") res = (a == c);
-            else if (op.op == "<>") res = (a != c);
-            else if (op.op == "<") res = (a < c);
-            else if (op.op == ">") res = (a > c);
-            else if (op.op == "<=") res = (a <= c);
-            else if (op.op == ">=") res = (a >= c);
+            // Handle string comparisons
+            if (std::holds_alternative<Str>(lhs) && std::holds_alternative<Str>(rhs)) {
+                const auto& a = std::get<Str>(lhs).v;
+                const auto& c = std::get<Str>(rhs).v;
+                int cmp = a.compare(c);
+                if (op.op == "=") res = (cmp == 0);
+                else if (op.op == "<>") res = (cmp != 0);
+                else if (op.op == "<") res = (cmp < 0);
+                else if (op.op == ">") res = (cmp > 0);
+                else if (op.op == "<=") res = (cmp <= 0);
+                else if (op.op == ">=") res = (cmp >= 0);
+            }
+            // Handle numeric comparisons
+            else if (isNumeric(lhs) && isNumeric(rhs)) {
+                double a = toDouble(lhs);
+                double c = toDouble(rhs);
+                if (op.op == "=") res = (a == c);
+                else if (op.op == "<>") res = (a != c);
+                else if (op.op == "<") res = (a < c);
+                else if (op.op == ">") res = (a > c);
+                else if (op.op == "<=") res = (a <= c);
+                else if (op.op == ">=") res = (a >= c);
+            }
+            // Type mismatch: mixing strings and numbers
+            else {
+                throw BasicError(13, "Type mismatch", pos);
+            }
             lhs = Int16{static_cast<int16_t>(res ? -1 : 0)};
             skipSpaces(b, pos);
             continue;

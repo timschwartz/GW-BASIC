@@ -6,7 +6,7 @@ Always ask for permission before making changes you weren't explicitly asked to 
 
 Write C++20 compatible code.
 
-Put classes in namespace "gw".
+Put classes in namespace "gwbasic".
 
 Header files should end in ".hpp".
 

@@ -80,12 +80,12 @@ This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be comp
 
 **Files**: `src/ProgramStore/` (ProgramStore.hpp, ProgramStore.cpp, test_programstore.cpp)
 
-### Expression Evaluator (98% Complete)
+### Expression Evaluator (100% Complete)
 - ✅ **Pratt Parser**: Precedence-based expression parsing
 - ✅ **Numeric Types**: Int16, Single, Double with proper coercion
 - ✅ **String Support**: String expressions and operations
 - ✅ **Arithmetic Operators**: +, -, *, /, ^, MOD
-- ✅ **Comparison Operators**: =, <>, <, >, <=, >=
+- ✅ **Comparison Operators**: =, <>, <, >, <=, >= (including tokenized operator support)
 - ✅ **Logical Operators**: AND, OR, XOR, NOT, EQV, IMP
 - ✅ **Variable References**: Integration with variable table
 - ✅ **Tokenized Constants**: Decoding of embedded numeric constants
@@ -99,6 +99,7 @@ This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be comp
 - ✅ **Floating-point Support**: Complete support for floating-point numbers in function arguments
 - ✅ **Array Element Access**: Complete support for array subscript syntax (A(I,J) and A[I,J])
 - ✅ **Function vs Array Disambiguation**: Intelligent parsing to distinguish function calls from array access
+- ✅ **Tokenized Operator Handling**: Complete support for tokenized comparison operators (<>, <=, >=) with proper recognition and consumption
 
 **Files**: `src/ExpressionEvaluator/` (ExpressionEvaluator.hpp, ExpressionEvaluator.cpp, test_expression.cpp)  
 **Documentation**: `docs/ARRAY_IMPLEMENTATION.md` - Complete implementation guide for array element access
@@ -401,7 +402,7 @@ Recent fixes:
 |-----------|------------|---------------|---------|
 | Tokenizer | 100% | ~800 | Stable |
 | Program Store | 95% | ~600 | Stable |
-| Expression Evaluator | 98% | ~1000 | Almost Complete |
+| Expression Evaluator | 100% | ~1000 | Complete |
 | Numeric Engine | 100% | ~1200 | Complete |
 | Runtime System | 100% | ~1750 | Complete |
 | Interpreter Loop | 90% | ~350 | Core Complete |
