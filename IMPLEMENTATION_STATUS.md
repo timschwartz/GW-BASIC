@@ -2,7 +2,7 @@
 
 A comprehensive status overview of the GW-BASIC reimplementation in C++.
 
-**Last Updated:** September 13, 2025  
+**Last Updated:** September 14, 2025  
 **Current Version:** 0.1
 
 ## Summary
@@ -12,6 +12,7 @@ This project includes:
 - ✅ **SCREEN Statement**: Complete implementation with 14 video modes (0-13), dynamic window resizing, graphics mode switching, and text framebuffer overlay for graphics modes
 - ✅ **COLOR Statement**: Complete foreground and background color support with standard 16-color CGA/EGA/VGA palette (colors 0-15 for foreground, 0-7 for background)
 - ✅ **WIDTH Statement**: Text column width control (supports 40/80/132); updates text mode layout and resizes SDL window appropriately in GUI mode; safe no-op in console mode
+ - ✅ **LOCATE Statement**: Sets text cursor row/column and visibility in GUI mode; accepted as a no-op in console mode; tolerant parsing of omitted/null arguments; start/stop (cursor shape) parsed but currently ignored
 - ✅ **Sequential File I/O**: Complete OPEN, CLOSE, PRINT#, INPUT# implementation with file mode support (INPUT/OUTPUT/APPEND), file number management, and proper tokenizer integration
 - ✅ **Random Access File Support**: OPEN with LEN for custom record lengths, plus FIELD/LSET/RSET mapping and GET/PUT record I/O (file-side complete)
 - ✅ **FILES Command**: Implemented extended statement FILES with DOS-style wildcard matching (* and ?) and optional path prefix; outputs matching names via print callback
@@ -237,6 +238,7 @@ This project includes:
  - ✅ NEW: **DEF SEG / PEEK / POKE**: Added simple memory model (1 MiB) with current segment tracking; PEEK and POKE operate on current segment offset, DEF SEG with or without = supported
  - ✅ NEW: **DEFINT/DEFSNG/DEFDBL/DEFSTR**: Letter-range parsing (e.g., A-C, M, X-Z) updates DefaultTypeTable for implicit variable typing
  - ✅ NEW: **WIDTH Statement**: Parses WIDTH n; validates allowed columns (40, 80, 132); invokes UI width callback; throws "Illegal function call" on invalid values
+  - ✅ NEW: **LOCATE Statement (parsing + behavior)**: Robust, tokenizer-aware parsing for LOCATE [row][,[column][,[cursor][,[start][,[stop]]]]] in immediate/program modes; accepts omitted/null arguments and consumes trailing tokens to avoid spurious syntax errors. Wired via dispatcher callback: in GUI mode updates cursor position (1-based to internal 0-based) and cursor visibility; in console mode it's a safe no-op. Start/stop (cursor shape) parsed but ignored for now.
 
 **Files**: `src/InterpreterLoop/BasicDispatcher.hpp`, `src/Graphics/` (GraphicsContext.hpp, GraphicsContext.cpp)
 **Recent Enhancements:**

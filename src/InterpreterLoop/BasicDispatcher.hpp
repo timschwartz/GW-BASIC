@@ -47,9 +47,11 @@ public:
     using ColorCallback = std::function<bool(int, int)>; // foreground, background -> success
     using WidthCallback = std::function<bool(int)>; // columns -> success
     using GraphicsBufferCallback = std::function<uint8_t*()>; // get graphics pixel buffer
+    // LOCATE callback: row, col, cursor, start, stop (1-based for row/col; -1 means "no change")
+    using LocateCallback = std::function<bool(int, int, int, int, int)>;
     
-    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr, ScreenModeCallback screenCb = nullptr, ColorCallback colorCb = nullptr, GraphicsBufferCallback graphicsBufCb = nullptr, WidthCallback widthCb = nullptr)
-        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), fileManager(), userFunctionManager(&strHeap, tok), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb), colorCallback(colorCb), graphicsBufferCallback(graphicsBufCb), widthCallback(widthCb), graphics() {
+    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr, ScreenModeCallback screenCb = nullptr, ColorCallback colorCb = nullptr, GraphicsBufferCallback graphicsBufCb = nullptr, WidthCallback widthCb = nullptr, LocateCallback locateCb = nullptr)
+        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), fileManager(), userFunctionManager(&strHeap, tok), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb), colorCallback(colorCb), graphicsBufferCallback(graphicsBufCb), widthCallback(widthCb), locateCallback(locateCb), graphics() {
         // Wire up cross-references
         vars.setStringHeap(&strHeap);
         vars.setArrayManager(&arrayManager);
@@ -224,6 +226,7 @@ private:
     ColorCallback colorCallback;
     GraphicsBufferCallback graphicsBufferCallback;
     WidthCallback widthCallback;
+    LocateCallback locateCallback;
     uint16_t currentLine = 0; // Current line number being executed
     bool testMode = false; // Set to true to avoid waiting for input in tests
     GraphicsContext graphics; // Graphics drawing context
@@ -455,6 +458,7 @@ private:
         if (name == "PSET") return doPSET(b, pos);
         if (name == "PRESET") return doPRESET(b, pos);
         if (name == "LINE") return doLINE(b, pos);
+        if (name == "LOCATE") return doLOCATE(b, pos);
         return 0;
     }
 
@@ -3140,6 +3144,104 @@ private:
         if (printCallback) {
             std::string msg = "WIDTH " + std::to_string(cols) + " - Active\n";
             printCallback(msg);
+        }
+        return 0;
+    }
+
+    // LOCATE [row][,[column][,[cursor][,[start][,[stop]]]]]
+    // Parse parameters and, if a locateCallback is provided by the host, request cursor/state update.
+    // Null parameters between commas are allowed (e.g., LOCATE ,10). -1 indicates "no change".
+    uint16_t doLOCATE(const std::vector<uint8_t>& b, size_t& pos) {
+        auto isTokenNamed = [&](size_t p, const char* name)->bool {
+            if (p >= b.size()) return false;
+            uint8_t t = b[p];
+            if (t < 0x80) {
+                // ASCII single-char match (e.g., ',', ':')
+                return name && name[1] == '\0' && static_cast<uint8_t>(name[0]) == t;
+            }
+            return tok && tok->getTokenName(t) == name;
+        };
+        auto isComma = [&](size_t p)->bool { return isTokenNamed(p, ","); };
+        auto isColon = [&](size_t p)->bool { return isTokenNamed(p, ":"); };
+        auto isEnd   = [&](size_t p)->bool { return p >= b.size() || b[p] == 0x00 || isColon(p); };
+
+        skipSpaces(b, pos);
+
+        auto tryParseInt = [&](int16_t& out)->bool {
+            if (isEnd(pos) || isComma(pos)) return false; // null parameter
+            auto res = ev.evaluate(b, pos, env);
+            pos = res.nextPos;
+            out = expr::ExpressionEvaluator::toInt16(res.value);
+            return true;
+        };
+
+    int16_t row = -1, col = -1, cursor = -1, start = -1, stop = -1;
+        (void)row; (void)col; (void)cursor; (void)start; (void)stop;
+
+        // row
+        (void)tryParseInt(row);
+        skipSpaces(b, pos);
+        if (isComma(pos)) {
+            ++pos; skipSpaces(b, pos);
+            // column
+            (void)tryParseInt(col);
+            skipSpaces(b, pos);
+            if (isComma(pos)) {
+                ++pos; skipSpaces(b, pos);
+                // cursor
+                (void)tryParseInt(cursor);
+                skipSpaces(b, pos);
+                if (isComma(pos)) {
+                    ++pos; skipSpaces(b, pos);
+                    // start
+                    (void)tryParseInt(start);
+                    skipSpaces(b, pos);
+                    if (isComma(pos)) {
+                        ++pos; skipSpaces(b, pos);
+                        // stop
+                        (void)tryParseInt(stop);
+                        skipSpaces(b, pos);
+                    }
+                }
+            }
+        }
+
+        // If host provided a callback, request the cursor/state change now
+        if (locateCallback) {
+            // Convert to host-consumed ints; BASIC rows/cols are 1-based; -1 means no change
+            // We do not enforce bounds here; host can clamp to its screen size.
+            bool ok = false;
+            try {
+                ok = locateCallback(static_cast<int>(row), static_cast<int>(col), static_cast<int>(cursor), static_cast<int>(start), static_cast<int>(stop));
+            } catch (const std::exception&) {
+                ok = false;
+            }
+            if (!ok) {
+                // Follow GW-BASIC behavior: invalid coordinates -> Illegal function call
+                // but keep tolerant for partial implementations: only throw if explicit bad inputs
+                // e.g., row or col equals 0 (GW-BASIC rows/cols start at 1 when specified)
+                if ((row == 0) || (col == 0)) {
+                    throwBasicError(5, "Illegal function call: LOCATE", pos);
+                }
+            }
+        }
+
+        // Defensively consume any trailing tokens to EOL or ':' so nothing remains for implied LET
+        skipSpaces(b, pos);
+        while (!isEnd(pos)) {
+            uint8_t t = b[pos];
+            if (t == '"') {
+                ++pos; while (!atEnd(b, pos) && b[pos] != '"' && b[pos] != 0x00) ++pos; if (!atEnd(b, pos) && b[pos] == '"') ++pos;
+            } else if (t == 0x11) { // integer literal token
+                pos += 3;
+            } else if (t == 0x1D) { // single
+                pos += 5;
+            } else if (t == 0x1F) { // double
+                pos += 9;
+            } else {
+                ++pos;
+            }
+            skipSpaces(b, pos);
         }
         return 0;
     }

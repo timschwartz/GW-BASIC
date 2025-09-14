@@ -154,7 +154,28 @@ public:
             [this](int mode) -> bool { return changeScreenMode(mode); },
             [this](int foreground, int background) -> bool { return changeColor(foreground, background); },
             [this]() -> uint8_t* { return getGraphicsBuffer(); },
-            [this](int columns) -> bool { return changeWidth(columns); });
+            [this](int columns) -> bool { return changeWidth(columns); },
+            // LOCATE callback
+            [this](int row, int col, int cursor, int start, int stop) -> bool {
+                (void)start; (void)stop; // Not used yet
+                // Accept -1 as "no change"; BASIC LOCATE rows/cols are 1-based
+                // Clamp to screen bounds when specified
+                if (row != -1) {
+                    if (row <= 0) return false; // invalid
+                    int maxRow = getTextRows();
+                    cursorY = std::max(0, std::min(maxRow - 1, row - 1));
+                }
+                if (col != -1) {
+                    if (col <= 0) return false; // invalid
+                    cursorX = std::max(0, std::min(cols - 1, col - 1));
+                }
+                if (cursor != -1) {
+                    // In GW-BASIC, cursor parameter controls cursor visibility/blink
+                    // 0 = off, 1 = on; some dialects support shape via start/stop
+                    cursorVisible = (cursor != 0);
+                }
+                return true;
+            });
         
         // Connect event trap system between interpreter and dispatcher
         interpreter->setEventTrapSystem(dispatcher->getEventTrapSystem());
@@ -1484,7 +1505,13 @@ int runConsoleMode(int argc, char* argv[]) {
             return true;
         },
         nullptr,  // graphics buffer callback (not supported in console mode)
-        [&](int /*columns*/) -> bool { return true; }); // width callback (no-op in console mode)
+        [&](int /*columns*/) -> bool { return true; }, // width callback (no-op in console mode)
+        // LOCATE callback: console mode can't reposition the input cursor reliably
+        // for piped input; accept and ignore to keep semantics tolerant.
+        [&](int row, int col, int cursor, int start, int stop) -> bool {
+            (void)row; (void)col; (void)cursor; (void)start; (void)stop;
+            return true;
+        });
     
     // Create InterpreterLoop for proper program execution
     auto interpreter = std::make_unique<InterpreterLoop>(programStore, tokenizer);
