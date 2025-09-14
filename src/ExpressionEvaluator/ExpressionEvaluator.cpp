@@ -138,19 +138,20 @@ bool ExpressionEvaluator::tryDecodeFunction(const std::vector<uint8_t>& b, size_
             case 0x15: funcName = "CHR$"; return true;
             case 0x16: funcName = "PEEK"; return true;
             case 0x17: funcName = "SPACE$"; return true;
-            case 0x18: funcName = "OCT$"; return true;
-            case 0x19: funcName = "HEX$"; return true;
-            case 0x1A: funcName = "LPOS"; return true;
-            case 0x1B: funcName = "CINT"; return true;
-            case 0x1C: funcName = "CSNG"; return true;
-            case 0x1D: funcName = "CDBL"; return true;
-            case 0x1E: funcName = "FIX"; return true;
-            case 0x1F: funcName = "PEN"; return true;
-            case 0x20: funcName = "STICK"; return true;
-            case 0x21: funcName = "STRIG"; return true;
-            case 0x22: funcName = "EOF"; return true;
-            case 0x23: funcName = "LOC"; return true;
-            case 0x24: funcName = "LOF"; return true;
+            case 0x18: funcName = "STRING$"; return true;
+            case 0x19: funcName = "OCT$"; return true;
+            case 0x1A: funcName = "HEX$"; return true;
+            case 0x1B: funcName = "LPOS"; return true;
+            case 0x1C: funcName = "CINT"; return true;
+            case 0x1D: funcName = "CSNG"; return true;
+            case 0x1E: funcName = "CDBL"; return true;
+            case 0x1F: funcName = "FIX"; return true;
+            case 0x20: funcName = "PEN"; return true;
+            case 0x21: funcName = "STICK"; return true;
+            case 0x22: funcName = "STRIG"; return true;
+            case 0x23: funcName = "EOF"; return true;
+            case 0x24: funcName = "LOC"; return true;
+            case 0x25: funcName = "LOF"; return true;
             default: return false;
         }
     }
@@ -463,6 +464,40 @@ Value ExpressionEvaluator::parseBuiltinFunction(const std::string& funcName, con
             } else {
                 return Str{str.substr(start)};
             }
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (upperFuncName == "STRING$" && args.size() == 2) {
+        if (isNumeric(args[0])) {
+            int16_t count = toInt16(args[0]);
+            if (count < 0) throw BasicError(5, "Illegal function call", 0);
+            if (count > 255) throw BasicError(5, "Illegal function call", 0);
+            
+            char ch;
+            if (std::holds_alternative<Str>(args[1])) {
+                const auto& str = std::get<Str>(args[1]).v;
+                if (str.empty()) throw BasicError(5, "Illegal function call", 0);
+                ch = str[0];
+            } else if (isNumeric(args[1])) {
+                int16_t asciiCode = toInt16(args[1]);
+                if (asciiCode < 0 || asciiCode > 255) throw BasicError(5, "Illegal function call", 0);
+                ch = static_cast<char>(asciiCode);
+            } else {
+                throw BasicError(13, "Type mismatch", 0);
+            }
+            
+            return Str{std::string(count, ch)};
+        }
+        throw BasicError(13, "Type mismatch", 0);
+    }
+    
+    if (upperFuncName == "SPACE$" && args.size() == 1) {
+        if (isNumeric(args[0])) {
+            int16_t count = toInt16(args[0]);
+            if (count < 0) throw BasicError(5, "Illegal function call", 0);
+            if (count > 255) throw BasicError(5, "Illegal function call", 0);
+            return Str{std::string(count, ' ')};
         }
         throw BasicError(13, "Type mismatch", 0);
     }

@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <algorithm>
 #include <system_error>
+#include <unordered_map>
 
 #include "../Tokenizer/Tokenizer.hpp"
 #include "../ProgramStore/ProgramStore.hpp"
@@ -344,6 +345,20 @@ private:
     }
     static bool isSpace(uint8_t c) { return c==' '||c=='\t'||c=='\r'||c=='\n'; }
     static void skipSpaces(const std::vector<uint8_t>& b, size_t& pos) { while (pos < b.size() && isSpace(b[pos])) ++pos; }
+    
+    // Helper: match either ASCII symbol or its tokenized form by name
+    bool isSymbolAt(const std::vector<uint8_t>& b, size_t pos, char ascii, const char* tokenName) const {
+        if (pos >= b.size()) return false;
+        if (b[pos] == static_cast<uint8_t>(ascii)) return true;
+        if (b[pos] >= 0x80 && tok) return tok->getTokenName(b[pos]) == tokenName;
+        return false;
+    }
+    
+    // Helper: consume symbol if present
+    bool consumeSymbol(const std::vector<uint8_t>& b, size_t& pos, char ascii, const char* tokenName) const {
+        if (isSymbolAt(b, pos, ascii, tokenName)) { ++pos; return true; }
+        return false;
+    }
 
     // PRINT USING helper method for string formatting
     std::string formatStringWithPattern(const std::string& formatString, const std::string& value) {
@@ -388,6 +403,48 @@ private:
         }
     }
 
+    // Debug helper: dump a window of upcoming tokens to a log file for diagnostics
+    void debugDumpTokens(const char* tag, const std::vector<uint8_t>& b, size_t pos, size_t count = 24) const {
+        try {
+            std::ofstream ofs("/tmp/gwbasic_debug.log", std::ios::app);
+            if (!ofs) return;
+            ofs << tag << " line=" << currentLine << " pos=" << pos << " bytes:";
+            size_t end = std::min(b.size(), pos + count);
+            for (size_t i = pos; i < end; ++i) {
+                ofs << ' ' << std::hex << std::showbase << static_cast<int>(b[i]) << std::dec;
+            }
+            ofs << " | names:";
+            for (size_t i = pos; i < end; ++i) {
+                uint8_t c = b[i];
+                if (c == 0x00) { ofs << " [EOL]"; break; }
+                if (c >= 0x80 && tok) {
+                    ofs << " [" << tok->getTokenName(c) << "]";
+                } else if (c == '"') {
+                    ofs << " [";
+                    ofs << '"';
+                    ofs << '"';
+                    ofs << "]";
+                } else if (c >= ' ' && c < 0x7f) {
+                    ofs << ' ' << static_cast<char>(c);
+                } else if (c == 0x11) {
+                    if (i + 2 < b.size()) {
+                        uint16_t v = static_cast<uint16_t>(b[i+1]) | (static_cast<uint16_t>(b[i+2]) << 8);
+                        ofs << " [INT:" << v << "]"; i += 2;
+                    } else {
+                        ofs << " [INT:?]";
+                    }
+                } else if (c == 0x1D) {
+                    ofs << " [SINGLE]"; i += 4;
+                } else if (c == 0x1F) {
+                    ofs << " [DOUBLE]"; i += 8;
+                }
+            }
+            ofs << '\n';
+        } catch (...) {
+            // ignore
+        }
+    }
+
     uint16_t handleStatement(const std::vector<uint8_t>& b, size_t& pos) {
         if (pos >= b.size()) return 0;
         uint8_t t = b[pos++];
@@ -428,7 +485,9 @@ private:
         
         if (name == "PRINT") return doPRINT(b, pos);
         if (name == "END" || name == "STOP") return 0xFFFF;
-        if (name == "INPUT") return doINPUT(b, pos);
+        if (name == "INPUT") {
+            return doINPUT(b, pos);
+        }
         if (name == "LET") return handleLet(b, pos, false);
     if (name == "DIM") return doDIM(b, pos);
     if (name == "DEF") return doDEF(b, pos);
@@ -542,7 +601,6 @@ private:
             this->throwBasicError(53, "File not found", pos);
         }
 
-        // Sort case-insensitively for stable output
         std::sort(names.begin(), names.end(), [&](const string& a, const string& b){
             return toUpper(a) < toUpper(b);
         });
@@ -723,6 +781,7 @@ private:
     }
 
     uint16_t doPRINT(const std::vector<uint8_t>& b, size_t& pos) {
+        debugDumpTokens("doPRINT:entry", b, pos);
         // Check for PRINT# (file output) syntax first
         skipSpaces(b, pos);
         uint8_t fileNumber = 0; // 0 means console output
@@ -792,6 +851,7 @@ private:
             if (b[pos] == ';' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ";")) {
                 trailingSemicolon = true;
                 ++pos;
+                debugDumpTokens("doPRINT:found-semicolon", b, pos);
                 continue;
             }
             // Comma token or ASCII
@@ -799,15 +859,18 @@ private:
                 output += "\t";
                 trailingSemicolon = false;
                 ++pos;
+                debugDumpTokens("doPRINT:found-comma", b, pos);
                 continue;
             }
             // Colon token or ASCII: end of PRINT list
             if (b[pos] == ':' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ":")) { ++pos; break; }
             // Expression
+            debugDumpTokens("doPRINT:before-expr", b, pos);
             auto res = catchAndRethrowWithLineNumber([&]() { 
                 return ev.evaluate(b, pos, env); 
             });
             pos = res.nextPos;
+            debugDumpTokens("doPRINT:after-expr", b, pos);
             std::visit([&](auto&& x){ 
                 using T = std::decay_t<decltype(x)>; 
                 if constexpr (std::is_same_v<T, expr::Str>) output += x.v; 
@@ -1374,21 +1437,21 @@ private:
         skipSpaces(b, pos);
         
         // Check if this is an array assignment: VAR(indices) = expr
-        if (!atEnd(b, pos) && (b[pos] == '(' || b[pos] == '[' || b[pos] == 0xf3)) {
+        if (!atEnd(b, pos) && (isSymbolAt(b, pos, '(', "(") || b[pos] == '[')) {
             // Array assignment
             char openBracket = '\0';
             char closeBracket = '\0';
-            bool isTokenized = false;
+            bool parenTokenized = false;
             
             if (b[pos] == '(' || b[pos] == '[') {
                 openBracket = static_cast<char>(b[pos]);
                 closeBracket = (openBracket == '(') ? ')' : ']';
-                isTokenized = false;
+                parenTokenized = false;
                 ++pos; // consume opening bracket
-            } else if (b[pos] == 0xf3) {  // tokenized left parenthesis
+            } else if (isSymbolAt(b, pos, '(', "(")) {  // tokenized left parenthesis
                 openBracket = '(';
                 closeBracket = ')';
-                isTokenized = true;
+                parenTokenized = true;
                 ++pos; // consume opening bracket token
             }
             
@@ -1397,12 +1460,12 @@ private:
             
             // Define a lambda to check for closing bracket
             auto isClosingBracket = [&](uint8_t ch) -> bool {
-                if (!isTokenized) {
+                if (!parenTokenized) {
                     // We started with ASCII, expect ASCII closing
                     return ch == closeBracket;
                 } else {
                     // We started with tokenized parenthesis, expect tokenized closing
-                    return ch == 0xf4; // tokenized right parenthesis
+                    return (ch == static_cast<uint8_t>(')')) || (ch >= 0x80 && tok && tok->getTokenName(ch) == ")");
                 }
             };
             
@@ -1421,7 +1484,7 @@ private:
                 skipSpaces(b, pos);
                 
                 // Check for comma (more indices)
-                if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) { // 0xF5 is tokenized comma
+                if (!atEnd(b, pos) && isSymbolAt(b, pos, ',', ",")) {
                     ++pos; // consume comma
                     continue;
                 }
@@ -1431,7 +1494,7 @@ private:
             
             // Expect closing bracket
             bool found_closing_bracket = false;
-            if (!isTokenized) {
+            if (!parenTokenized) {
                 // We started with ASCII, expect ASCII closing
                 if (!atEnd(b, pos) && b[pos] == closeBracket) {
                     found_closing_bracket = true;
@@ -1439,7 +1502,7 @@ private:
                 }
             } else {
                 // We started with tokenized parenthesis, expect tokenized closing
-                if (!atEnd(b, pos) && b[pos] == 0xf4) { // tokenized right parenthesis
+                if (!atEnd(b, pos) && isSymbolAt(b, pos, ')', ")")) { // tokenized right parenthesis
                     found_closing_bracket = true;
                     ++pos;
                 }
@@ -1960,6 +2023,7 @@ private:
     }
     
     uint16_t doON(const std::vector<uint8_t>& b, size_t& pos) {
+        debugDumpTokens("doON:entry", b, pos);
         skipSpaces(b, pos);
         
         // Check for event trap syntax first: ON ERROR, ON KEY, ON TIMER, etc.
@@ -2030,10 +2094,9 @@ private:
                 
                 // Parse KEY(n) or just KEY
                 uint8_t keyIndex = 0;
-                if (!atEnd(b, pos) && (b[pos] == '(' || b[pos] == 0xf3)) {
+                if (!atEnd(b, pos) && isSymbolAt(b, pos, '(', "(")) {
                     // KEY(n) syntax
-                    if (b[pos] == '(') ++pos;
-                    else if (b[pos] == 0xf3) ++pos; // tokenized (
+                    ++pos; // consume '('
                     
                     skipSpaces(b, pos);
                     auto res = ev.evaluate(b, pos, env);
@@ -2041,7 +2104,7 @@ private:
                     keyIndex = static_cast<uint8_t>(expr::ExpressionEvaluator::toInt16(res.value));
                     
                     skipSpaces(b, pos);
-                    if (!atEnd(b, pos) && (b[pos] == ')' || b[pos] == 0xf4)) {
+                    if (!atEnd(b, pos) && isSymbolAt(b, pos, ')', ")")) {
                         ++pos; // consume closing )
                     }
                 }
@@ -2087,10 +2150,9 @@ private:
                 
                 // Parse TIMER(interval)
                 uint16_t interval = 1; // default 1 second
-                if (!atEnd(b, pos) && (b[pos] == '(' || b[pos] == 0xf3)) {
+                if (!atEnd(b, pos) && isSymbolAt(b, pos, '(', "(")) {
                     // TIMER(interval) syntax
-                    if (b[pos] == '(') ++pos;
-                    else if (b[pos] == 0xf3) ++pos; // tokenized (
+                    ++pos; // consume '('
                     
                     skipSpaces(b, pos);
                     auto res = ev.evaluate(b, pos, env);
@@ -2098,7 +2160,7 @@ private:
                     interval = static_cast<uint16_t>(expr::ExpressionEvaluator::toInt16(res.value));
                     
                     skipSpaces(b, pos);
-                    if (!atEnd(b, pos) && (b[pos] == ')' || b[pos] == 0xf4)) {
+                    if (!atEnd(b, pos) && isSymbolAt(b, pos, ')', ")")) {
                         ++pos; // consume closing )
                     }
                 }
@@ -2142,8 +2204,10 @@ private:
         
         // Handle traditional ON expression GOTO/GOSUB syntax
         // Evaluate the expression to get the index
-        auto res = ev.evaluate(b, pos, env);
+    debugDumpTokens("doON:before-index-eval", b, pos);
+    auto res = ev.evaluate(b, pos, env);
         pos = res.nextPos;
+    debugDumpTokens("doON:after-index-eval", b, pos);
         
         // Convert to integer index (1-based)
         int16_t index = expr::ExpressionEvaluator::toInt16(res.value);
@@ -2163,6 +2227,7 @@ private:
                     ++pos;
                     isGosub = true;
                 } else {
+                    debugDumpTokens("doON:unexpected-keyword", b, pos);
                     throw expr::BasicError(2, "Expected GOTO or GOSUB in ON statement", pos);
                 }
             } else {
@@ -2178,10 +2243,12 @@ private:
                     isGosub = true;
                 } else {
                     pos = save;
+                    debugDumpTokens("doON:ascii-keyword-fail", b, pos);
                     throw expr::BasicError(2, "Expected GOTO or GOSUB in ON statement", pos);
                 }
             }
         } else {
+            debugDumpTokens("doON:missing-keyword", b, pos);
             throw expr::BasicError(2, "Expected GOTO or GOSUB in ON statement", pos);
         }
         
@@ -2194,17 +2261,16 @@ private:
             skipSpaces(b, pos);
             if (atEnd(b, pos) || b[pos] == ':' || b[pos] == 0x00) break;
             
-            // Check for comma separator first
-            if (b[pos] == ',' || b[pos] == 0xF5 || b[pos] == 0xF6) { // 0xF5/0xF6 are tokenized commas
-                ++pos; // consume comma and continue
-                continue;
-            }
+            // Check for comma separator first (ASCII or tokenized)
+            if (isSymbolAt(b, pos, ',', ",")) { ++pos; continue; }
             
             // Try to parse line number using readLineNumber which understands tokenized integers
             try {
+                debugDumpTokens("doON:before-readLineNumber", b, pos);
                 uint16_t lineNum = readLineNumber(b, pos);
                 lineNumbers.push_back(lineNum);
             } catch (...) {
+                debugDumpTokens("doON:readLineNumber-exception", b, pos);
                 // Not a valid line number - end of list
                 break;
             }
@@ -2212,9 +2278,7 @@ private:
             skipSpaces(b, pos);
             
             // Optional comma - if present, consume it for next iteration
-            if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5 || b[pos] == 0xF6)) {
-                ++pos; // consume comma
-            }
+            if (!atEnd(b, pos) && isSymbolAt(b, pos, ',', ",")) { ++pos; }
         }
         
         // If index is out of range (0 or negative, or beyond list), do nothing
@@ -2266,7 +2330,7 @@ private:
                 closeBracket = (openBracket == '(') ? ')' : ']';
                 isTokenized = false;
                 ++pos; // consume opening bracket
-            } else if (b[pos] == 0xf3) {  // tokenized left parenthesis
+            } else if (isSymbolAt(b, pos, '(', "(")) {  // tokenized left parenthesis
                 openBracket = '(';
                 closeBracket = ')';
                 isTokenized = true;
@@ -2309,7 +2373,7 @@ private:
                 skipSpaces(b, pos);
                 
                 // Check for comma (more dimensions)
-                if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) { // 0xF5 is tokenized comma
+                if (!atEnd(b, pos) && isSymbolAt(b, pos, ',', ",")) { // tokenized or ASCII comma
                     ++pos; // consume comma
                     continue;
                 }
@@ -2328,7 +2392,7 @@ private:
                 }
             } else {
                 // We started with tokenized parenthesis, expect tokenized closing
-                if (!atEnd(b, pos) && b[pos] == 0xf4) { // tokenized right parenthesis
+                if (!atEnd(b, pos) && isSymbolAt(b, pos, ')', ")")) { // tokenized right parenthesis
                     found_closing_bracket = true;
                     ++pos;
                 }
@@ -2367,7 +2431,7 @@ private:
             skipSpaces(b, pos);
             
             // Check for comma (more arrays)
-            if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5 || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) { // 0xF5 is tokenized comma
+            if (!atEnd(b, pos) && isSymbolAt(b, pos, ',', ",")) { // tokenized or ASCII comma
                 ++pos; // consume comma
                 continue;
             }
@@ -3333,7 +3397,7 @@ private:
             skipSpaces(b, pos);
             
             // Expect comma after file number (ASCII or tokenized)
-            if (!atEnd(b, pos) && (b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) {
+            if (!atEnd(b, pos) && isSymbolAt(b, pos, ',', ",")) {
                 ++pos; // consume comma
                 skipSpaces(b, pos);
             } else {
@@ -3363,10 +3427,10 @@ private:
                     
                     skipSpaces(b, pos);
                     
-                    // Check for separator after prompt
-                    if (!atEnd(b, pos) && (b[pos] == ';' || b[pos] == 0xF6 || b[pos] == ',' || b[pos] == 0xF5)) {
+                    // Check for separator after prompt (semicolon or comma, ASCII or tokenized)
+                    if (!atEnd(b, pos) && (isSymbolAt(b, pos, ';', ";") || isSymbolAt(b, pos, ',', ","))) {
                         // Check separator type
-                        if (b[pos] == ';' || b[pos] == 0xF6) {
+                        if (isSymbolAt(b, pos, ';', ";")) {
                             suppressNewline = true; // Semicolon suppresses newline
                         }
                         ++pos; // consume separator
@@ -3384,7 +3448,7 @@ private:
                     skipSpaces(b, pos);
                     
                     // If followed by semicolon or comma, this is a prompt
-                    if (!atEnd(b, pos) && (b[pos] == ';' || b[pos] == 0xF6 || b[pos] == ',' || b[pos] == 0xF5)) {
+                    if (!atEnd(b, pos) && (isSymbolAt(b, pos, ';', ";") || isSymbolAt(b, pos, ',', ","))) {
                         // This is a prompt
                         std::visit([&](auto&& x) {
                             using T = std::decay_t<decltype(x)>;
@@ -3401,7 +3465,7 @@ private:
                         }, res.value);
                         
                         // Check separator type
-                        if (b[pos] == ';' || b[pos] == 0xF6) {
+                        if (isSymbolAt(b, pos, ';', ";")) {
                             suppressNewline = true; // Semicolon suppresses newline
                         }
                         ++pos; // consume separator
@@ -3448,9 +3512,8 @@ private:
             skipSpaces(b, pos);
             
             // Check for comma (more variables)
-            if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) { // 0xF5 is tokenized comma
+            if (!atEnd(b, pos) && isSymbolAt(b, pos, ',', ",")) {
                 ++pos; // consume comma
-               
                 continue;
             }
             
@@ -3511,7 +3574,7 @@ private:
             skipSpaces(b, pos);
             
             // Check for comma (more variables)
-            if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) { // 0xF5 is tokenized comma
+            if (!atEnd(b, pos) && isSymbolAt(b, pos, ',', ",")) {
                 ++pos; // consume comma
                 continue;
             }

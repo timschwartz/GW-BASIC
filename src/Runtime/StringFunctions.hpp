@@ -41,6 +41,8 @@ public:
     gwbasic::Value right(const gwbasic::Value& source, int16_t count);
     gwbasic::Value mid(const gwbasic::Value& source, int16_t start, int16_t optCount = -1);
     gwbasic::Value val(const gwbasic::Value& stringValue);
+    gwbasic::Value string(int16_t count, const gwbasic::Value& charOrAscii);
+    gwbasic::Value space(int16_t count);
     int16_t len(const gwbasic::Value& stringValue);
     int16_t asc(const gwbasic::Value& stringValue);
     int16_t instr(const gwbasic::Value& source, const gwbasic::Value& search, int16_t start = 1);

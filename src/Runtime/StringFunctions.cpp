@@ -156,6 +156,61 @@ gwbasic::Value StringFunctionProcessor::val(const gwbasic::Value& stringValue) {
     return parseNumeric(str);
 }
 
+gwbasic::Value StringFunctionProcessor::string(int16_t count, const gwbasic::Value& charOrAscii) {
+    if (count < 0) {
+        throw std::runtime_error("Illegal function call: STRING$ count cannot be negative");
+    }
+    
+    if (count > 255) {
+        throw std::runtime_error("Illegal function call: STRING$ count too large");
+    }
+    
+    char ch;
+    if (isString(charOrAscii)) {
+        // If it's a string, use the first character
+        if (charOrAscii.s.len == 0) {
+            throw std::runtime_error("Illegal function call: STRING$ with empty string");
+        }
+        std::string str = stringManager_->toString(charOrAscii.s);
+        ch = str[0];
+    } else if (isNumeric(charOrAscii)) {
+        // If it's a number, treat it as ASCII code
+        int16_t asciiCode = toInt16(charOrAscii);
+        if (asciiCode < 0 || asciiCode > 255) {
+            throw std::runtime_error("Illegal function call: ASCII code out of range");
+        }
+        ch = static_cast<char>(asciiCode);
+    } else {
+        throw std::runtime_error("Type mismatch: STRING$ requires string or numeric argument");
+    }
+    
+    std::string result(count, ch);
+    StrDesc desc;
+    if (stringManager_->createString(result, desc)) {
+        return gwbasic::Value::makeString(desc);
+    }
+    // Memory allocation failed - return empty string
+    return gwbasic::Value::makeString(StrDesc{});
+}
+
+gwbasic::Value StringFunctionProcessor::space(int16_t count) {
+    if (count < 0) {
+        throw std::runtime_error("Illegal function call: SPACE$ count cannot be negative");
+    }
+    
+    if (count > 255) {
+        throw std::runtime_error("Illegal function call: SPACE$ count too large");
+    }
+    
+    std::string result(count, ' ');
+    StrDesc desc;
+    if (stringManager_->createString(result, desc)) {
+        return gwbasic::Value::makeString(desc);
+    }
+    // Memory allocation failed - return empty string
+    return gwbasic::Value::makeString(StrDesc{});
+}
+
 int16_t StringFunctionProcessor::len(const gwbasic::Value& stringValue) {
     if (!isString(stringValue)) {
         throw std::runtime_error("Type mismatch: LEN requires string argument");
@@ -273,6 +328,27 @@ bool StringFunctionProcessor::callStringFunction(const std::string& funcName, co
             auto runtimeArg = exprToRuntime(args[0]);
             int16_t asciiVal = asc(runtimeArg);
             result = expr::Int16{asciiVal};
+            return true;
+        }
+        
+        if (upperFuncName == "STRING$" && args.size() == 2) {
+            auto runtimeArg1 = exprToRuntime(args[0]);
+            auto runtimeArg2 = exprToRuntime(args[1]);
+            if (!isNumeric(runtimeArg1)) {
+                throw std::runtime_error("Type mismatch");
+            }
+            auto runtimeResult = string(toInt16(runtimeArg1), runtimeArg2);
+            result = runtimeToExpr(runtimeResult);
+            return true;
+        }
+        
+        if (upperFuncName == "SPACE$" && args.size() == 1) {
+            auto runtimeArg = exprToRuntime(args[0]);
+            if (!isNumeric(runtimeArg)) {
+                throw std::runtime_error("Type mismatch");
+            }
+            auto runtimeResult = space(toInt16(runtimeArg));
+            result = runtimeToExpr(runtimeResult);
             return true;
         }
         

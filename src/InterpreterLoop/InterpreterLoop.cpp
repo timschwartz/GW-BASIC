@@ -2,6 +2,8 @@
 
 #include <stdexcept>
 #include <utility>
+#include <iostream>
+#include <ostream>
 
 #include "../ProgramStore/ProgramStore.hpp"
 #include "../Tokenizer/Tokenizer.hpp"
@@ -198,6 +200,11 @@ uint16_t InterpreterLoop::handleRuntimeError(const gwbasic::GWError& error) {
         
         // Push error frame onto stack
         runtimeStack->pushErr(frame);
+        
+        // Debug trace for error handling
+        std::cerr << "[InterpreterLoop] handleRuntimeError: code=" << frame.errCode
+              << " at line=" << frame.resumeLine
+              << ", handler=" << frame.errorHandlerLine << std::endl;
         
         // Jump to error handler
         uint16_t handlerLine = runtimeStack->getErrorHandlerLine();

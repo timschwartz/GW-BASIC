@@ -96,7 +96,6 @@ void Tokenizer::initializeTables() {
     addKeyword("NOT", keywordStart++);
     addKeyword("ERL", keywordStart++);
     addKeyword("ERR", keywordStart++);
-    addKeyword("STRING$", keywordStart++);
     addKeyword("USING", keywordStart++);
     addKeyword("INSTR", keywordStart++);
     addKeyword("VARPTR", keywordStart++);
@@ -107,7 +106,13 @@ void Tokenizer::initializeTables() {
     addKeyword("INKEY$", keywordStart++);
     
     // Add operators (with gaps for token alignment)
-    uint8_t operatorStart = keywordStart + 7;
+    // IMPORTANT: Do not derive from the incremented keywordStart here, as it
+    // shifts operator tokens into the 0xF1..0xF3 range used below for special
+    // multi-character operators (>=, <=, <>). That collision breaks detokenize
+    // and parsing (e.g., '(' ended up as 0xF3 "<>"). Anchor operator tokens
+    // just after the statement/keyword block using a stable base.
+    // TOKEN_LOCATE is 0xC9; start operators at 0xD1 to leave some breathing room.
+    uint8_t operatorStart = TOKEN_LOCATE + 1 + 7; // 0xD1
     addOperator('>', operatorStart++);  // GREATK
     addOperator('=', operatorStart++);  // EQULTK
     addOperator('<', operatorStart++);  // LESSTK
@@ -166,19 +171,20 @@ void Tokenizer::initializeTables() {
     addStandardFunction("CHR$", 0x15);
     addStandardFunction("PEEK", 0x16);
     addStandardFunction("SPACE$", 0x17);
-    addStandardFunction("OCT$", 0x18);
-    addStandardFunction("HEX$", 0x19);
-    addStandardFunction("LPOS", 0x1A);
-    addStandardFunction("CINT", 0x1B);
-    addStandardFunction("CSNG", 0x1C);
-    addStandardFunction("CDBL", 0x1D);
-    addStandardFunction("FIX", 0x1E);
-    addStandardFunction("PEN", 0x1F);
-    addStandardFunction("STICK", 0x20);
-    addStandardFunction("STRIG", 0x21);
-    addStandardFunction("EOF", 0x22);
-    addStandardFunction("LOC", 0x23);
-    addStandardFunction("LOF", 0x24);
+    addStandardFunction("STRING$", 0x18); // Corrected token for STRING$
+    addStandardFunction("OCT$", 0x19);
+    addStandardFunction("HEX$", 0x1A);
+    addStandardFunction("LPOS", 0x1B);
+    addStandardFunction("CINT", 0x1C);
+    addStandardFunction("CSNG", 0x1D);
+    addStandardFunction("CDBL", 0x1E);
+    addStandardFunction("FIX", 0x1F);
+    addStandardFunction("PEN", 0x20);
+    addStandardFunction("STICK", 0x21);
+    addStandardFunction("STRIG", 0x22);
+    addStandardFunction("EOF", 0x23);
+    addStandardFunction("LOC", 0x24);
+    addStandardFunction("LOF", 0x25);
     
     // Add extended statements (two-byte tokens with 0xFE prefix)
     if (extendedMode) {
