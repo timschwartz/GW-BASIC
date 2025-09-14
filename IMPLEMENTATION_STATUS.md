@@ -19,7 +19,10 @@ This project includes:
 - ✅ **FILES Command**: Implemented extended statement FILES with DOS-style wildcard matching (* and ?) and optional path prefix; outputs matching names via print callback
 - ✅ **KILL Command**: Implemented extended statement KILL for file deletion with proper error handling for non-existent files and directories
 - ✅ **NAME Command**: Implemented extended statement NAME for file renaming with 'oldname AS newname' syntax and comprehensive error handling
- - ✅ **Error Handling**: Complete ON ERROR GOTO, RESUME, ERROR statement implementation with proper error routing, ERL/ERR variables, and comprehensive error handler managementThis is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 95% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, comprehensive event trap handling, full function key support, complete SCREEN statement with graphics mode support and text framebuffer, user-defined function support (DEF FN), complete INPUT/PRINT behavior aligned with GW-BASIC semantics, fixed OPEN statement LEN parameter support, and comprehensive error handling system. Recent work added comprehensive function key support (F1-F10) with soft key expansion and event trap integration, unified console and GUI execution through the InterpreterLoop, added extended-statement handling (including SYSTEM), fixed PRINT/PRINT USING parsing at line terminators, implemented full SCREEN statement functionality with 14 video modes, dynamic window resizing, and scaled text overlay for graphics modes, completed DEF FN user-defined function implementation with proper error handling and line number reporting, and finalized the complete error handling system with ON ERROR GOTO, RESUME, and ERROR statement implementations.
+ - ✅ **Error Handling**: Complete ON ERROR GOTO, RESUME, ERROR statement implementation with proper error routing, ERL/ERR variables, and comprehensive error handler management
+ - ✅ **INKEY$ Function**: Complete non-blocking keyboard input implementation with SDL integration, proper tokenization as function (not keyword), callback system for both GUI and console modes, and full GW-BASIC compatibility
+
+This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be compatible with the original interpreter while using modern programming practices and tools. The implementation is **approximately 97% complete** with core functionality operational, robust string memory management implemented, complete array runtime support, comprehensive event trap handling, full function key support, complete SCREEN statement with graphics mode support and text framebuffer, user-defined function support (DEF FN), complete INPUT/PRINT behavior aligned with GW-BASIC semantics, fixed OPEN statement LEN parameter support, comprehensive error handling system, and INKEY$ function for non-blocking keyboard input. Recent work added comprehensive function key support (F1-F10) with soft key expansion and event trap integration, unified console and GUI execution through the InterpreterLoop, added extended-statement handling (including SYSTEM), fixed PRINT/PRINT USING parsing at line terminators, implemented full SCREEN statement functionality with 14 video modes, dynamic window resizing, and scaled text overlay for graphics modes, completed DEF FN user-defined function implementation with proper error handling and line number reporting, finalized the complete error handling system with ON ERROR GOTO, RESUME, and ERROR statement implementations, and implemented INKEY$ function with proper SDL keyboard integration and callback architecture.
  - ✅ NEW: Memory peek/poke and type defaults
    - DEF SEG [= value] implemented; maintains current segment for memory operations
    - PEEK(address) wired to read from simulated DOS memory at segment*16 + address
@@ -314,10 +317,11 @@ This project includes:
 - ✅ **Random Access Operations**: FIELD mapping, LSET/RSET, and GET/PUT for random-access records with proper buffer management and GW-BASIC-compatible padding/trim semantics
 - ✅ **Directory Operations**: FILES (wildcards and optional path), KILL (file delete), NAME (rename with AS) implemented with filesystem error mapping to GW-BASIC error codes
 
-### Input/Output (85% Complete)
+### Input/Output (90% Complete)
 - ✅ **PRINT**: Basic output with some formatting
 - ✅ **PRINT USING**: Formatted numeric output with comprehensive pattern support (###.##, comma separators, currency symbols, sign indicators, asterisk fill)
 - ✅ **INPUT**: Complete user input implementation with prompt support, type coercion, cross-platform handling (console stdin/GUI SDL events), and test mode support
+- ✅ **INKEY$**: Complete non-blocking keyboard input function with SDL integration, proper function tokenization, callback architecture for both GUI and console modes, and full GW-BASIC compatibility
 - ✅ **File I/O**: Sequential file operations (OPEN, CLOSE, INPUT#, PRINT#) with complete file mode support and proper tokenizer integration
 - ❌ **Device I/O**: Printer (LPRINT), communications ports
  
@@ -403,7 +407,7 @@ Recent fixes:
 | Interpreter Loop | 90% | ~350 | Core Complete |
 | Basic Dispatcher | 100% | ~1700 | Complete |
 | User Interface | 90% | ~700 | Well Featured |
-| **Overall** | **96%** | **~8100** | **Release Candidate** |
+| **Overall** | **97%** | **~8100** | **Release Candidate** |
 
 ## 🎯 Next Priority Items
 

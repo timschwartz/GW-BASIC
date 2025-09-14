@@ -152,6 +152,7 @@ bool ExpressionEvaluator::tryDecodeFunction(const std::vector<uint8_t>& b, size_
             case 0x23: funcName = "EOF"; return true;
             case 0x24: funcName = "LOC"; return true;
             case 0x25: funcName = "LOF"; return true;
+            case 0x26: funcName = "INKEY$"; return true;
             default: return false;
         }
     }

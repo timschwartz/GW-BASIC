@@ -103,7 +103,6 @@ void Tokenizer::initializeTables() {
     addKeyword("POINT", keywordStart++);
     addKeyword("OFF", keywordStart++);
     addKeyword("AS", keywordStart++); // Needed for OPEN ... AS #n and FILES/FIELD syntax spacing
-    addKeyword("INKEY$", keywordStart++);
     
     // Add operators (with gaps for token alignment)
     // IMPORTANT: Do not derive from the incremented keywordStart here, as it
@@ -185,6 +184,7 @@ void Tokenizer::initializeTables() {
     addStandardFunction("EOF", 0x23);
     addStandardFunction("LOC", 0x24);
     addStandardFunction("LOF", 0x25);
+    addStandardFunction("INKEY$", 0x26);
     
     // Add extended statements (two-byte tokens with 0xFE prefix)
     if (extendedMode) {

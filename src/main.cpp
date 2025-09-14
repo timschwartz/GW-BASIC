@@ -5,6 +5,7 @@
 #include <vector>
 #include <memory>
 #include <array>
+#include <queue>
 #include <sstream>
 #include <iomanip>
 #include <cctype>
@@ -114,6 +115,9 @@ private:
     std::array<std::string, NUM_FUNCTION_KEYS> softKeys;
     bool functionKeysEnabled = true;  // Whether to display function keys
     
+    // INKEY$ keyboard buffer
+    std::queue<char> keyBuffer;
+    
     // Helper function to get effective text rows (excluding function key line)
     int getTextRows() const {
         return functionKeysEnabled ? rows - 1 : rows;
@@ -180,6 +184,10 @@ public:
             [this]() -> bool {
                 clearScreen();
                 return true;
+            },
+            // INKEY$ callback
+            [this]() -> std::string {
+                return checkKeyPressed();
             });
         
         // Connect event trap system between interpreter and dispatcher
@@ -537,6 +545,54 @@ private:
         } else {
             print("Ok\n");
         }
+    }
+    
+    // INKEY$ implementation - check for a key press without blocking
+    std::string checkKeyPressed() {
+        // Return any buffered key first
+        if (!keyBuffer.empty()) {
+            char key = keyBuffer.front();
+            keyBuffer.pop();
+            return std::string(1, key);
+        }
+        
+        // Check for new events (non-blocking)
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_KEY_DOWN) {
+                SDL_Keycode keycode = event.key.key;
+                
+                // Convert common keys to single characters for INKEY$
+                if (keycode >= SDLK_SPACE && keycode <= SDLK_Z) {
+                    char key = static_cast<char>(keycode);
+                    // Handle shift for letters
+                    if (keycode >= SDLK_A && keycode <= SDLK_Z) {
+                        if (!(event.key.mod & SDL_KMOD_SHIFT)) {
+                            key = std::tolower(key);
+                        }
+                    }
+                    return std::string(1, key);
+                }
+                
+                // Handle special keys
+                switch (keycode) {
+                    case SDLK_RETURN: return "\r";
+                    case SDLK_ESCAPE: return "\x1B";
+                    case SDLK_BACKSPACE: return "\x08";
+                    case SDLK_TAB: return "\t";
+                    case SDLK_SPACE: return " ";
+                    default:
+                        // Ignore other keys for INKEY$
+                        break;
+                }
+            } else {
+                // Re-handle other events through normal path
+                handleEvent(event);
+            }
+        }
+        
+        // No key pressed
+        return "";
     }
     
     void handleEvent(const SDL_Event& event) {
@@ -1521,6 +1577,10 @@ int runConsoleMode(int argc, char* argv[]) {
         [&]() -> bool {
             std::cout << "\033[2J\033[H";
             return true;
+        },
+        // INKEY$ callback for console mode: always return empty string (non-blocking not easily supported in console)
+        []() -> std::string {
+            return "";
         });
     
     // Create InterpreterLoop for proper program execution

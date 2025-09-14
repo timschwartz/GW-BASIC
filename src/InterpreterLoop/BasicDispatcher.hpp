@@ -52,9 +52,11 @@ public:
     using LocateCallback = std::function<bool(int, int, int, int, int)>;
     // CLS callback: clear the display and home cursor
     using ClsCallback = std::function<bool()>;
+    // INKEY$ callback: returns a single character from keyboard buffer, or empty string if no key pressed
+    using InkeyCallback = std::function<std::string()>;
     
-    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr, ScreenModeCallback screenCb = nullptr, ColorCallback colorCb = nullptr, GraphicsBufferCallback graphicsBufCb = nullptr, WidthCallback widthCb = nullptr, LocateCallback locateCb = nullptr, ClsCallback clsCb = nullptr)
-        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), fileManager(), userFunctionManager(&strHeap, tok), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb), colorCallback(colorCb), graphicsBufferCallback(graphicsBufCb), widthCallback(widthCb), locateCallback(locateCb), clsCallback(clsCb), graphics() {
+    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr, ScreenModeCallback screenCb = nullptr, ColorCallback colorCb = nullptr, GraphicsBufferCallback graphicsBufCb = nullptr, WidthCallback widthCb = nullptr, LocateCallback locateCb = nullptr, ClsCallback clsCb = nullptr, InkeyCallback inkeyCb = nullptr)
+        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), fileManager(), userFunctionManager(&strHeap, tok), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb), colorCallback(colorCb), graphicsBufferCallback(graphicsBufCb), widthCallback(widthCb), locateCallback(locateCb), clsCallback(clsCb), inkeyCallback(inkeyCb), graphics() {
         // Wire up cross-references
         vars.setStringHeap(&strHeap);
         vars.setArrayManager(&arrayManager);
@@ -132,6 +134,20 @@ public:
                     this->throwBasicError(5, "Illegal function call: address out of range", 0);
                 }
                 out = expr::Int16{ static_cast<int16_t>(this->dosMemory[phys]) };
+                return true;
+            }
+
+            // Handle INKEY$ function
+            if (upperName == "INKEY$") {
+                if (args.size() != 0) {
+                    this->throwBasicError(5, "Illegal function call: INKEY$ takes no arguments", 0);
+                }
+                // Call the INKEY$ callback if available, otherwise return empty string
+                std::string key = "";
+                if (this->inkeyCallback) {
+                    key = this->inkeyCallback();
+                }
+                out = expr::Str{ key };
                 return true;
             }
 
@@ -232,6 +248,7 @@ private:
     WidthCallback widthCallback;
     LocateCallback locateCallback;
     ClsCallback clsCallback;
+    InkeyCallback inkeyCallback;
     uint16_t currentLine = 0; // Current line number being executed
     bool testMode = false; // Set to true to avoid waiting for input in tests
     GraphicsContext graphics; // Graphics drawing context
