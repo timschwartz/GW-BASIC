@@ -175,6 +175,11 @@ public:
                     cursorVisible = (cursor != 0);
                 }
                 return true;
+            },
+            // CLS callback
+            [this]() -> bool {
+                clearScreen();
+                return true;
             });
         
         // Connect event trap system between interpreter and dispatcher
@@ -1510,6 +1515,11 @@ int runConsoleMode(int argc, char* argv[]) {
         // for piped input; accept and ignore to keep semantics tolerant.
         [&](int row, int col, int cursor, int start, int stop) -> bool {
             (void)row; (void)col; (void)cursor; (void)start; (void)stop;
+            return true;
+        },
+        // CLS callback in console mode: ANSI clear screen and home
+        [&]() -> bool {
+            std::cout << "\033[2J\033[H";
             return true;
         });
     

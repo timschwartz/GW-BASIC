@@ -49,9 +49,11 @@ public:
     using GraphicsBufferCallback = std::function<uint8_t*()>; // get graphics pixel buffer
     // LOCATE callback: row, col, cursor, start, stop (1-based for row/col; -1 means "no change")
     using LocateCallback = std::function<bool(int, int, int, int, int)>;
+    // CLS callback: clear the display and home cursor
+    using ClsCallback = std::function<bool()>;
     
-    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr, ScreenModeCallback screenCb = nullptr, ColorCallback colorCb = nullptr, GraphicsBufferCallback graphicsBufCb = nullptr, WidthCallback widthCb = nullptr, LocateCallback locateCb = nullptr)
-        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), fileManager(), userFunctionManager(&strHeap, tok), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb), colorCallback(colorCb), graphicsBufferCallback(graphicsBufCb), widthCallback(widthCb), locateCallback(locateCb), graphics() {
+    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr, ScreenModeCallback screenCb = nullptr, ColorCallback colorCb = nullptr, GraphicsBufferCallback graphicsBufCb = nullptr, WidthCallback widthCb = nullptr, LocateCallback locateCb = nullptr, ClsCallback clsCb = nullptr)
+        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), fileManager(), userFunctionManager(&strHeap, tok), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb), colorCallback(colorCb), graphicsBufferCallback(graphicsBufCb), widthCallback(widthCb), locateCallback(locateCb), clsCallback(clsCb), graphics() {
         // Wire up cross-references
         vars.setStringHeap(&strHeap);
         vars.setArrayManager(&arrayManager);
@@ -171,7 +173,8 @@ public:
             if (atEnd(tokens, pos)) break;
             // Stop if we reached a genuine line terminator (0x00 not belonging to a numeric token)
             if (pos < tokens.size() && isLineTerminator(tokens, pos)) break;
-            if (tokens[pos] == ':') { ++pos; continue; }
+            // Treat both ASCII ':' and tokenized ':' as statement separators
+            if (tokens[pos] == ':' || (tokens[pos] >= 0x80 && tok && tok->getTokenName(tokens[pos]) == ":")) { ++pos; continue; }
             uint8_t b = tokens[pos];
             uint16_t r = 0;
             if (b >= 0x80) {
@@ -182,7 +185,7 @@ public:
             if (r != 0) return r; // jump or termination sentinel
             skipSpaces(tokens, pos);
             if (!atEnd(tokens, pos) && pos < tokens.size() && isLineTerminator(tokens, pos)) break;
-            if (!atEnd(tokens, pos) && tokens[pos] == ':') { ++pos; continue; }
+            if (!atEnd(tokens, pos) && (tokens[pos] == ':' || (tokens[pos] >= 0x80 && tok && tok->getTokenName(tokens[pos]) == ":"))) { ++pos; continue; }
             // If not colon, continue loop which will finish if atEnd
         }
         return 0;
@@ -227,6 +230,7 @@ private:
     GraphicsBufferCallback graphicsBufferCallback;
     WidthCallback widthCallback;
     LocateCallback locateCallback;
+    ClsCallback clsCallback;
     uint16_t currentLine = 0; // Current line number being executed
     bool testMode = false; // Set to true to avoid waiting for input in tests
     GraphicsContext graphics; // Graphics drawing context
@@ -455,6 +459,7 @@ private:
         if (name == "SCREEN") return doSCREEN(b, pos);
         if (name == "COLOR") return doCOLOR(b, pos);
         if (name == "WIDTH") return doWIDTH(b, pos);
+        if (name == "CLS") return doCLS(b, pos);
         if (name == "PSET") return doPSET(b, pos);
         if (name == "PRESET") return doPRESET(b, pos);
         if (name == "LINE") return doLINE(b, pos);
@@ -783,18 +788,21 @@ private:
             if (atEnd(b, pos)) break;
             if (pos < b.size() && b[pos] == 0x00) break; // after skipping spaces
             // Separators
-            if (b[pos] == 0xF7 || b[pos] == ';') { // semicolon token or ASCII
+            // Semicolon token or ASCII
+            if (b[pos] == ';' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ";")) {
                 trailingSemicolon = true;
                 ++pos;
                 continue;
             }
-            if (b[pos] == 0xF6 || b[pos] == ',') { // comma token or ASCII
+            // Comma token or ASCII
+            if (b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ",")) {
                 output += "\t";
                 trailingSemicolon = false;
                 ++pos;
                 continue;
             }
-            if (b[pos] == ':') { ++pos; break; }
+            // Colon token or ASCII: end of PRINT list
+            if (b[pos] == ':' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ":")) { ++pos; break; }
             // Expression
             auto res = catchAndRethrowWithLineNumber([&]() { 
                 return ev.evaluate(b, pos, env); 
@@ -852,8 +860,8 @@ private:
         
         skipSpaces(b, pos);
         
-        // Expect semicolon after format string (semicolon is tokenized as 0xF6)
-        if (!atEnd(b, pos) && b[pos] == 0xF6) {
+        // Expect semicolon after format string (tokenized or ASCII)
+        if (!atEnd(b, pos) && (b[pos] == ';' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ";"))) {
             ++pos;
         } else {
             throwBasicError(2, "Expected ';' after USING format string", pos);
@@ -870,12 +878,12 @@ private:
             if (pos < b.size() && b[pos] == 0x00) break;
             
             // Handle separators
-            if (b[pos] == 0xF6 || b[pos] == ';') {  // semicolon token or ASCII
+            if (b[pos] == ';' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ";")) {  // semicolon token or ASCII
                 trailingSemicolon = true; 
                 ++pos; 
                 continue; 
             }
-            if (b[pos] == 0xF5 || b[pos] == ',') {  // comma token or ASCII
+            if (b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ",")) {  // comma token or ASCII
                 // For PRINT USING, comma usually means next field, 
                 // but we'll treat it as continuation
                 ++pos; 
@@ -914,9 +922,9 @@ private:
             trailingSemicolon = false;
             
             skipSpaces(b, pos);
-            if (!atEnd(b, pos) && b[pos] == ':') { ++pos; break; }
-            if (!atEnd(b, pos) && (b[pos] == ';' || b[pos] == 0xF6)) { trailingSemicolon = true; ++pos; }
-            if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) { ++pos; trailingSemicolon = false; }
+            if (!atEnd(b, pos) && (b[pos] == ':' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ":"))) { ++pos; break; }
+            if (!atEnd(b, pos) && (b[pos] == ';' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ";"))) { trailingSemicolon = true; ++pos; }
+            if (!atEnd(b, pos) && (b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) { ++pos; trailingSemicolon = false; }
         }
         
         if (!trailingSemicolon) output += "\n";
@@ -3242,6 +3250,45 @@ private:
                 ++pos;
             }
             skipSpaces(b, pos);
+        }
+        return 0;
+    }
+
+    // CLS [n]
+    // Clear the display; optional numeric argument is parsed and ignored for now.
+    uint16_t doCLS(const std::vector<uint8_t>& b, size_t& pos) {
+        skipSpaces(b, pos);
+        // Optional argument (zone) is allowed in GW-BASIC; we accept and ignore.
+        if (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+            auto savePos = pos;
+            try {
+                auto res = ev.evaluate(b, pos, env);
+                (void)res; // ignore value
+            } catch (...) {
+                // Not an expression, revert
+                pos = savePos;
+            }
+        }
+
+        // Consume trailing to end-of-statement
+        skipSpaces(b, pos);
+        while (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+            uint8_t t = b[pos];
+            if (t == '"') {
+                ++pos; while (!atEnd(b, pos) && b[pos] != '"' && b[pos] != 0x00) ++pos; if (!atEnd(b, pos) && b[pos] == '"') ++pos;
+            } else if (t == 0x11) { pos += 3; }
+            else if (t == 0x1D) { pos += 5; }
+            else if (t == 0x1F) { pos += 9; }
+            else { ++pos; }
+            skipSpaces(b, pos);
+        }
+
+        bool ok = true;
+        if (clsCallback) {
+            try { ok = clsCallback(); } catch (...) { ok = false; }
+        }
+        if (!ok) {
+            throwBasicError(5, "Illegal function call: CLS", pos);
         }
         return 0;
     }
