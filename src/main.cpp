@@ -11,6 +11,7 @@
 #include <cctype>
 #include <algorithm>
 #include <unistd.h> // for isatty
+#include <optional>
 
 // GW-BASIC components
 #include "Tokenizer/Tokenizer.hpp"
@@ -550,55 +551,70 @@ private:
     // INKEY$ implementation - check for a key press without blocking
     std::string checkKeyPressed() {
         // Return any buffered key first
-        if (!keyBuffer.empty()) {
-            char key = keyBuffer.front();
-            keyBuffer.pop();
+        if (!this->keyBuffer.empty()) {
+            char key = this->keyBuffer.front();
+            this->keyBuffer.pop();
             return std::string(1, key);
         }
-        
-        // Check for new events (non-blocking)
+
+        // Non-blocking: drain the SDL event queue, but don't starve QUIT
+        // Capture at most one character to return and buffer any extras
+        bool haveChar = false;
+        char firstChar = 0;
+
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_EVENT_KEY_DOWN) {
                 SDL_Keycode keycode = event.key.key;
-                
+
+                auto pushChar = [&](char ch){
+                    if (!haveChar) { haveChar = true; firstChar = ch; }
+                    else { this->keyBuffer.push(ch); }
+                };
+
                 // Convert common keys to single characters for INKEY$
                 if (keycode >= SDLK_SPACE && keycode <= SDLK_Z) {
                     char key = static_cast<char>(keycode);
                     // Handle shift for letters
                     if (keycode >= SDLK_A && keycode <= SDLK_Z) {
                         if (!(event.key.mod & SDL_KMOD_SHIFT)) {
-                            key = std::tolower(key);
+                            key = static_cast<char>(std::tolower(key));
                         }
                     }
-                    return std::string(1, key);
+                    pushChar(key);
+                    continue; // continue draining events so QUIT is honored
                 }
-                
+
                 // Handle special keys
                 switch (keycode) {
-                    case SDLK_RETURN: return "\r";
-                    case SDLK_ESCAPE: return "\x1B";
-                    case SDLK_BACKSPACE: return "\x08";
-                    case SDLK_TAB: return "\t";
-                    case SDLK_SPACE: return " ";
+                    case SDLK_RETURN: pushChar('\r'); break;
+                    case SDLK_ESCAPE: pushChar('\x1B'); break;
+                    case SDLK_BACKSPACE: pushChar('\x08'); break;
+                    case SDLK_TAB: pushChar('\t'); break;
+                    case SDLK_SPACE: pushChar(' '); break;
                     default:
                         // Ignore other keys for INKEY$
                         break;
                 }
+                // Keep draining to handle non-key events (e.g., QUIT)
             } else {
-                // Re-handle other events through normal path
-                handleEvent(event);
+                // Route non-key events (like window close) to the normal handler
+                this->handleEvent(event);
             }
         }
-        
-        // No key pressed
-        return "";
+
+        if (haveChar) return std::string(1, firstChar);
+        return ""; // No key pressed
     }
     
     void handleEvent(const SDL_Event& event) {
         switch (event.type) {
         case SDL_EVENT_QUIT:
-            running = false;
+            // Stop both the GUI loop and any running BASIC program
+            this->running = false;
+            if (this->interpreter) {
+                this->interpreter->stop();
+            }
             break;
             
         case SDL_EVENT_KEY_DOWN:
