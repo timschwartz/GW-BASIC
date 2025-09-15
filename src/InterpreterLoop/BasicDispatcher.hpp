@@ -2982,6 +2982,7 @@ private:
         }
         
         // Report mode change success
+        /*
         switch (mode) {
             case 0:
                 // Text mode (80x25 or 40x25)
@@ -3057,6 +3058,7 @@ private:
                 throwBasicError(5, "Illegal function call: Invalid screen mode " + std::to_string(mode), 0);
                 break;
         }
+        */
         
         return 0;
     }
@@ -3176,6 +3178,7 @@ private:
         }
         
         // Report color change
+        /*
         if (printCallback) {
             std::string message = "COLOR";
             if (foreground >= 0) {
@@ -3187,6 +3190,7 @@ private:
             message += " - Active\n";
             printCallback(message);
         }
+        */
         
         return 0;
     }
