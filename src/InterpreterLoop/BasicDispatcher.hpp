@@ -14,6 +14,8 @@
 #include <algorithm>
 #include <system_error>
 #include <unordered_map>
+#include <cmath>
+#include <cctype>
 
 #include "../Tokenizer/Tokenizer.hpp"
 #include "../ProgramStore/ProgramStore.hpp"
@@ -184,6 +186,9 @@ public:
         }
         if (atEnd(tokens, pos)) return 0;
 
+        // Debug: entry into execute loop with initial token window
+        debugDumpTokens("exec:entry", tokens, pos);
+
         // Execute statements separated by ':' until EOL or a jump/termination happens
         while (!atEnd(tokens, pos)) {
             skipSpaces(tokens, pos);
@@ -194,6 +199,8 @@ public:
             if (tokens[pos] == ':' || (tokens[pos] >= 0x80 && tok && tok->getTokenName(tokens[pos]) == ":")) { ++pos; continue; }
             uint8_t b = tokens[pos];
             uint16_t r = 0;
+            // Debug: about to dispatch a statement at current position
+            debugDumpTokens("exec:before-dispatch", tokens, pos);
             if (b >= 0x80) {
                 r = handleStatement(tokens, pos);
             } else {
@@ -252,6 +259,7 @@ private:
     uint16_t currentLine = 0; // Current line number being executed
     bool testMode = false; // Set to true to avoid waiting for input in tests
     GraphicsContext graphics; // Graphics drawing context
+    int currentGraphicsMode_ = -1; // last set via SCREEN; -1 means unknown
     // Simulated DOS memory for PEEK/POKE and DEF SEG state
     std::vector<uint8_t> dosMemory;
     uint16_t currentSegment = 0;
@@ -377,6 +385,29 @@ private:
         return false;
     }
 
+    // Helper: consume a keyword that may be tokenized or ASCII letters. Case-insensitive for ASCII.
+    bool consumeKeyword(const std::vector<uint8_t>& b, size_t& pos, const char* keyword) const {
+        if (atEnd(b, pos)) return false;
+        // Tokenized path
+        if (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == keyword) { ++pos; return true; }
+        // ASCII fallback
+        size_t p = pos;
+        size_t klen = std::strlen(keyword);
+        for (size_t i = 0; i < klen; ++i) {
+            if (p >= b.size()) { p = pos; return false; }
+            char c = static_cast<char>(b[p]);
+            if (!std::isalpha(static_cast<unsigned char>(c))) { p = pos; return false; }
+            if (std::toupper(c) != std::toupper(keyword[i])) { p = pos; return false; }
+            ++p;
+        }
+        // Ensure next char isn't an identifier char to avoid partial match (e.g., STEPP)
+        if (p < b.size()) {
+            char c = static_cast<char>(b[p]);
+            if (std::isalnum(static_cast<unsigned char>(c))) { return false; }
+        }
+        pos = p; return true;
+    }
+
     // PRINT USING helper method for string formatting
     std::string formatStringWithPattern(const std::string& formatString, const std::string& value) {
         // Simple implementation - just return the value for now
@@ -464,11 +495,23 @@ private:
 
     uint16_t handleStatement(const std::vector<uint8_t>& b, size_t& pos) {
         if (pos >= b.size()) return 0;
+        // Debug: entering statement handler with upcoming tokens
+        debugDumpTokens("handleStmt:entry", b, pos);
         uint8_t t = b[pos++];
+        // Debug: show the just-consumed token as well
+        if (pos > 0) {
+            size_t back = pos - 1;
+            debugDumpTokens("handleStmt:token", b, back);
+        }
     // Handle extended statements (0xFE <index>)
     if (t == 0xFE) { // EXTENDED_STATEMENT_PREFIX
             if (pos >= b.size()) return 0;
             uint8_t idx = b[pos++];
+            // Debug: show extended statement index token position
+            if (pos > 0) {
+                size_t back = pos - 1;
+                debugDumpTokens("handleStmt:ext-index", b, back);
+            }
             // Minimal mapping for the few extended statements we support here
             switch (idx) {
                 case 0x00: // FILES
@@ -2980,9 +3023,11 @@ private:
                 graphics.setMode(mode, buffer);
             }
         }
+
+        // Remember current mode to avoid resetting to defaults later
+        currentGraphicsMode_ = mode;
         
         // Report mode change success
-        /*
         switch (mode) {
             case 0:
                 // Text mode (80x25 or 40x25)
@@ -3058,7 +3103,6 @@ private:
                 throwBasicError(5, "Illegal function call: Invalid screen mode " + std::to_string(mode), 0);
                 break;
         }
-        */
         
         return 0;
     }
@@ -3178,7 +3222,6 @@ private:
         }
         
         // Report color change
-        /*
         if (printCallback) {
             std::string message = "COLOR";
             if (foreground >= 0) {
@@ -3190,7 +3233,6 @@ private:
             message += " - Active\n";
             printCallback(message);
         }
-        */
         
         return 0;
     }
@@ -4026,23 +4068,17 @@ private:
     uint16_t doPSET(const std::vector<uint8_t>& b, size_t& pos) {
         // PSET [STEP] (x,y) [,color]
         skipSpaces(b, pos);
+        debugDumpTokens("PSET:entry", b, pos);
         
         // Check for optional STEP keyword
         bool stepMode = false;
-        if (!atEnd(b, pos)) {
-            uint8_t t = b[pos];
-            if (t >= 0x80 && tok && tok->getTokenName(t) == "STEP") {
-                stepMode = true;
-                ++pos;
-                skipSpaces(b, pos);
-            }
-        }
+        if (consumeKeyword(b, pos, "STEP")) { stepMode = true; skipSpaces(b, pos); debugDumpTokens("PSET:after-STEP", b, pos); }
         
-        // Expect opening parenthesis (token 244)
-        if (atEnd(b, pos) || !(b[pos] == '(' || b[pos] == 244)) {
+        // Expect opening parenthesis (ASCII or tokenized)
+        if (!consumeSymbol(b, pos, '(', "(")) {
+            debugDumpTokens("PSET:expected-lparen", b, pos);
             throwBasicError(2, "Expected ( in PSET statement", pos);
         }
-        ++pos; // consume (
         
         skipSpaces(b, pos);
         
@@ -4055,9 +4091,8 @@ private:
         
         int y = 0; // declare y variable
         
-        // Check if we have a comma (token 246)
-        if (!atEnd(b, pos) && b[pos] == 246) {
-            ++pos; // consume comma (token 246)
+        // Expect comma between x and y
+        if (consumeSymbol(b, pos, ',', ",")) {
             skipSpaces(b, pos);
             
             // Parse y coordinate
@@ -4070,18 +4105,17 @@ private:
         
         skipSpaces(b, pos);
         
-        // Expect closing parenthesis (token 245)
-        if (atEnd(b, pos) || !(b[pos] == ')' || b[pos] == 245)) {
+        // Expect closing parenthesis (ASCII or tokenized)
+        if (!consumeSymbol(b, pos, ')', ")")) {
+            debugDumpTokens("PSET:expected-rparen", b, pos);
             throwBasicError(2, "Expected ) in PSET statement", pos);
         }
-        ++pos; // consume )
         
         skipSpaces(b, pos);
         
         // Optional color parameter
         int color = -1; // -1 means use default
-        if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 246)) {
-            ++pos; // consume comma
+        if (consumeSymbol(b, pos, ',', ",")) {
             skipSpaces(b, pos);
             
             if (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
@@ -4110,23 +4144,16 @@ private:
         // PRESET is PSET with color 0 (background)
         // Parse like PSET but force color to 0
         skipSpaces(b, pos);
+        debugDumpTokens("PRESET:entry", b, pos);
         
         // Check for optional STEP keyword
         bool stepMode = false;
-        if (!atEnd(b, pos)) {
-            uint8_t t = b[pos];
-            if (t >= 0x80 && tok && tok->getTokenName(t) == "STEP") {
-                stepMode = true;
-                ++pos;
-                skipSpaces(b, pos);
-            }
-        }
+        if (consumeKeyword(b, pos, "STEP")) { stepMode = true; skipSpaces(b, pos); debugDumpTokens("PRESET:after-STEP", b, pos); }
         
-        // Expect opening parenthesis
-        if (atEnd(b, pos) || !(b[pos] == '(')) {
+        // Expect opening parenthesis (ASCII or tokenized)
+        if (!consumeSymbol(b, pos, '(', "(")) {
             throwBasicError(2, "Expected ( in PRESET statement", pos);
         }
-        ++pos; // consume (
         
         skipSpaces(b, pos);
         
@@ -4137,11 +4164,10 @@ private:
         
         skipSpaces(b, pos);
         
-        // Expect comma
-        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 0xF5)) {
+        // Expect comma (ASCII or tokenized)
+        if (!consumeSymbol(b, pos, ',', ",")) {
             throwBasicError(2, "Expected comma in PRESET coordinates", pos);
         }
-        ++pos; // consume comma
         
         skipSpaces(b, pos);
         
@@ -4152,11 +4178,10 @@ private:
         
         skipSpaces(b, pos);
         
-        // Expect closing parenthesis
-        if (atEnd(b, pos) || !(b[pos] == ')' || b[pos] == 0xF4)) {
+        // Expect closing parenthesis (ASCII or tokenized)
+        if (!consumeSymbol(b, pos, ')', ")")) {
             throwBasicError(2, "Expected ) in PRESET statement", pos);
         }
-        ++pos; // consume )
         
         // Initialize graphics context if needed
         initializeGraphicsContext();
@@ -4175,23 +4200,16 @@ private:
         
         // Check for optional STEP keyword
         bool stepMode = false;
-        if (!atEnd(b, pos)) {
-            uint8_t t = b[pos];
-            if (t >= 0x80 && tok && tok->getTokenName(t) == "STEP") {
-                stepMode = true;
-                ++pos;
-                skipSpaces(b, pos);
-            }
-        }
+        if (consumeKeyword(b, pos, "STEP")) { stepMode = true; skipSpaces(b, pos); }
         
         bool hasStartPoint = true;
         int x1 = 0, y1 = 0, x2 = 0, y2 = 0;
         
         // Check if starts with - (no start point)
-        if (!atEnd(b, pos) && b[pos] == '-') {
+        if (!atEnd(b, pos) && isSymbolAt(b, pos, '-', "-")) {
             hasStartPoint = false;
             ++pos; // consume -
-        } else if (!atEnd(b, pos) && (b[pos] == '(' || b[pos] == 244)) {
+        } else if (!atEnd(b, pos) && isSymbolAt(b, pos, '(', "(")) {
             // Parse start point
             ++pos; // consume (
             skipSpaces(b, pos);
@@ -4202,10 +4220,9 @@ private:
             
             skipSpaces(b, pos);
             
-            if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 246)) {
+            if (!consumeSymbol(b, pos, ',', ",")) {
                 throwBasicError(2, "Expected comma in LINE start coordinates", pos);
             }
-            ++pos; // consume comma
             
             skipSpaces(b, pos);
             
@@ -4215,15 +4232,14 @@ private:
             
             skipSpaces(b, pos);
             
-            if (atEnd(b, pos) || !(b[pos] == ')' || b[pos] == 245)) {
+            if (!consumeSymbol(b, pos, ')', ")")) {
                 throwBasicError(2, "Expected ) in LINE start coordinates", pos);
             }
-            ++pos; // consume )
             
             skipSpaces(b, pos);
             
             // Expect - after start point (regular or tokenized)
-            if (atEnd(b, pos) || (b[pos] != '-' && b[pos] != 232)) {  // 232 is tokenized minus
+            if (!isSymbolAt(b, pos, '-', "-")) {
                 throwBasicError(2, "Expected - after start point in LINE", pos);
             }
             ++pos; // consume -
@@ -4234,7 +4250,7 @@ private:
         skipSpaces(b, pos);
         
         // Parse end point
-        if (atEnd(b, pos) || !(b[pos] == '(' || b[pos] == 244)) {
+        if (atEnd(b, pos) || !isSymbolAt(b, pos, '(', "(")) {
             throwBasicError(2, "Expected ( for end coordinates in LINE", pos);
         }
         ++pos; // consume (
@@ -4247,10 +4263,9 @@ private:
         
         skipSpaces(b, pos);
         
-        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 246)) {
+        if (!consumeSymbol(b, pos, ',', ",")) {
             throwBasicError(2, "Expected comma in LINE end coordinates", pos);
         }
-        ++pos; // consume comma
         
         skipSpaces(b, pos);
         
@@ -4260,20 +4275,18 @@ private:
         
         skipSpaces(b, pos);
         
-        if (atEnd(b, pos) || !(b[pos] == ')' || b[pos] == 245)) {
+        if (!consumeSymbol(b, pos, ')', ")")) {
             throwBasicError(2, "Expected ) in LINE end coordinates", pos);
         }
-        ++pos; // consume )
         
         skipSpaces(b, pos);
         
         // Optional color parameter
         int color = -1;
-        if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 246)) {
-            ++pos; // consume comma
+        if (!atEnd(b, pos) && consumeSymbol(b, pos, ',', ",")) {
             skipSpaces(b, pos);
             
-            if (!atEnd(b, pos) && b[pos] != ',' && b[pos] != 0xF5 && b[pos] != ':' && b[pos] != 0x00) {
+            if (!atEnd(b, pos) && b[pos] != ',' && b[pos] != ':' && b[pos] != 0x00) {
                 auto colorRes = ev.evaluate(b, pos, env);
                 pos = colorRes.nextPos;
                 color = expr::ExpressionEvaluator::toInt16(colorRes.value);
@@ -4289,7 +4302,7 @@ private:
         // Optional box flags (B, BF)
         bool isBox = false;
         bool isFilled = false;
-        if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) {
+        if (!atEnd(b, pos) && isSymbolAt(b, pos, ',', ",")) {
             ++pos; // consume comma
             skipSpaces(b, pos);
             
@@ -4336,20 +4349,15 @@ private:
     uint16_t doCIRCLE(const std::vector<uint8_t>& b, size_t& pos) {
         // CIRCLE [STEP] (x,y), radius [,color]
         skipSpaces(b, pos);
+        debugDumpTokens("CIRCLE:entry", b, pos);
         
         // Check for optional STEP keyword
         bool stepMode = false;
-        if (!atEnd(b, pos)) {
-            uint8_t t = b[pos];
-            if (t >= 0x80 && tok && tok->getTokenName(t) == "STEP") {
-                stepMode = true;
-                ++pos;
-                skipSpaces(b, pos);
-            }
-        }
+        if (consumeKeyword(b, pos, "STEP")) { stepMode = true; skipSpaces(b, pos); debugDumpTokens("CIRCLE:after-STEP", b, pos); }
         
         // Expect opening parenthesis
-        if (atEnd(b, pos) || !(b[pos] == '(' || b[pos] == 244)) {
+        if (atEnd(b, pos) || !isSymbolAt(b, pos, '(', "(")) {
+            debugDumpTokens("CIRCLE:expected-lparen", b, pos);
             throwBasicError(2, "Expected ( in CIRCLE statement", pos);
         }
         ++pos; // consume (
@@ -4364,10 +4372,9 @@ private:
         skipSpaces(b, pos);
         
         // Expect comma
-        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 246)) {
+        if (!consumeSymbol(b, pos, ',', ",")) {
             throwBasicError(2, "Expected comma in CIRCLE center coordinates", pos);
         }
-        ++pos; // consume comma
         
         skipSpaces(b, pos);
         
@@ -4379,18 +4386,16 @@ private:
         skipSpaces(b, pos);
         
         // Expect closing parenthesis
-        if (atEnd(b, pos) || !(b[pos] == ')' || b[pos] == 245)) {
+        if (!consumeSymbol(b, pos, ')', ")")) {
             throwBasicError(2, "Expected ) in CIRCLE center coordinates", pos);
         }
-        ++pos; // consume )
         
         skipSpaces(b, pos);
         
         // Expect comma before radius
-        if (atEnd(b, pos) || !(b[pos] == ',' || b[pos] == 246)) {
+        if (!consumeSymbol(b, pos, ',', ",")) {
             throwBasicError(2, "Expected comma before radius in CIRCLE", pos);
         }
-        ++pos; // consume comma
         
         skipSpaces(b, pos);
         
@@ -4407,8 +4412,7 @@ private:
         
         // Optional color parameter
         int color = -1;
-        if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 246)) {
-            ++pos; // consume comma
+        if (!atEnd(b, pos) && consumeSymbol(b, pos, ',', ",")) {
             skipSpaces(b, pos);
             
             if (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
@@ -4434,6 +4438,7 @@ private:
     }
     
     uint16_t doGET(const std::vector<uint8_t>& b, size_t& pos) {
+        debugDumpTokens("GET:entry", b, pos);
         skipSpaces(b, pos);
         
         // Check for file GET: GET #filenumber, [recordnumber]
@@ -4457,6 +4462,7 @@ private:
         
         // If we find an opening parenthesis, assume graphics GET
         if (!atEnd(b, lookAhead) && (b[lookAhead] == '(' || (b[lookAhead] >= 0x80 && tok && tok->getTokenName(b[lookAhead]) == "("))) {
+            debugDumpTokens("GET:route-graphics", b, pos);
             return doGraphicsGET(b, pos);
         }
         
@@ -4521,6 +4527,7 @@ private:
     uint16_t doGraphicsGET(const std::vector<uint8_t>& b, size_t& pos) {
         // GET [STEP] (x1,y1)-(x2,y2), arrayvar
         skipSpaces(b, pos);
+        debugDumpTokens("GETG:entry", b, pos);
         
         // Check for optional STEP keyword
         bool stepMode = false;
@@ -4530,14 +4537,15 @@ private:
                 stepMode = true;
                 ++pos;
                 skipSpaces(b, pos);
+                debugDumpTokens("GETG:after-STEP", b, pos);
             }
         }
         
         // Parse first corner
-        if (atEnd(b, pos) || !(b[pos] == '(' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "("))) {
+        if (!consumeSymbol(b, pos, '(', "(")) {
+            debugDumpTokens("GET:expected-lparen-1", b, pos);
             throwBasicError(2, "Expected ( in GET statement", pos);
         }
-        ++pos; // consume (
         
         skipSpaces(b, pos);
         
@@ -4547,10 +4555,9 @@ private:
         
         skipSpaces(b, pos);
         
-        if (atEnd(b, pos) || !(b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) {
+        if (!consumeSymbol(b, pos, ',', ",")) {
             throwBasicError(2, "Expected comma in GET coordinates", pos);
         }
-        ++pos; // consume comma
         
         skipSpaces(b, pos);
         
@@ -4560,15 +4567,16 @@ private:
         
         skipSpaces(b, pos);
         
-        if (atEnd(b, pos) || !(b[pos] == ')' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ")"))) {
+        if (!consumeSymbol(b, pos, ')', ")")) {
+            debugDumpTokens("GET:expected-rparen-1", b, pos);
             throwBasicError(2, "Expected ) in GET coordinates", pos);
         }
-        ++pos; // consume )
         
         skipSpaces(b, pos);
         
-        // Expect -
-        if (atEnd(b, pos) || b[pos] != '-') {
+        // Expect - (ASCII or tokenized)
+        if (!isSymbolAt(b, pos, '-', "-")) {
+            debugDumpTokens("GET:expected-dash", b, pos);
             throwBasicError(2, "Expected - in GET statement", pos);
         }
         ++pos; // consume -
@@ -4576,10 +4584,10 @@ private:
         skipSpaces(b, pos);
         
         // Parse second corner
-        if (atEnd(b, pos) || !(b[pos] == '(' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "("))) {
+        if (!consumeSymbol(b, pos, '(', "(")) {
+            debugDumpTokens("GET:expected-lparen-2", b, pos);
             throwBasicError(2, "Expected ( for second corner in GET", pos);
         }
-        ++pos; // consume (
         
         skipSpaces(b, pos);
         
@@ -4589,10 +4597,9 @@ private:
         
         skipSpaces(b, pos);
         
-        if (atEnd(b, pos) || !(b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) {
+        if (!consumeSymbol(b, pos, ',', ",")) {
             throwBasicError(2, "Expected comma in GET second coordinates", pos);
         }
-        ++pos; // consume comma
         
         skipSpaces(b, pos);
         
@@ -4602,18 +4609,17 @@ private:
         
         skipSpaces(b, pos);
         
-        if (atEnd(b, pos) || !(b[pos] == ')' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ")"))) {
+        if (!consumeSymbol(b, pos, ')', ")")) {
+            debugDumpTokens("GET:expected-rparen-2", b, pos);
             throwBasicError(2, "Expected ) in GET second coordinates", pos);
         }
-        ++pos; // consume )
         
         skipSpaces(b, pos);
         
         // Expect comma before array variable
-        if (atEnd(b, pos) || !(b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) {
+        if (!consumeSymbol(b, pos, ',', ",")) {
             throwBasicError(2, "Expected comma before array in GET", pos);
         }
-        ++pos; // consume comma
         
         skipSpaces(b, pos);
         
@@ -4632,25 +4638,52 @@ private:
             throwBasicError(5, "Illegal function call in GET", pos);
         }
         
-        // Store in array - for now, create a simple 1D array
-        // In a full implementation, we'd need to handle the specific GW-BASIC format
-        std::vector<int16_t> dimensions = {static_cast<int16_t>(pixelData.size())};
-        
-        if (!vars.createArray(arrayName, gwbasic::ScalarType::Int16, dimensions)) {
-            // Array might already exist - try to resize or use existing
+        // Write into an existing 1-D numeric array. Accept Int16, Single, or Double.
+        // Validate array exists and is 1-D numeric.
+        gwbasic::ValueType vt{}; uint8_t rank{}; std::vector<gwbasic::Dim> dims;
+        if (!arrayManager.getArrayInfo(arrayName, vt, rank, dims)) {
+            throwBasicError(9, "Subscript out of range or array not DIM'd", pos);
         }
-        
-        // Store pixel data in array
+        if (rank != 1) {
+            throwBasicError(9, "Type mismatch: GET requires a 1-D numeric array", pos);
+        }
+        if (!(vt == gwbasic::ValueType::Int16 || vt == gwbasic::ValueType::Single || vt == gwbasic::ValueType::Double)) {
+            throwBasicError(13, "Type mismatch: GET array must be numeric (INTEGER/SINGLE/DOUBLE)", pos);
+        }
+        // Compute capacity and lower bound
+        int32_t lb = static_cast<int32_t>(dims[0].lb);
+        int32_t ub = static_cast<int32_t>(dims[0].ub);
+        int64_t capacity = static_cast<int64_t>(ub) - static_cast<int64_t>(lb) + 1;
+        if (capacity < static_cast<int64_t>(pixelData.size())) {
+            throwBasicError(5, "Illegal function call: array too small for GET block", pos);
+        }
+        // Store pixel data elements with type conversion
         for (size_t i = 0; i < pixelData.size(); i++) {
-            std::vector<int32_t> indices = {static_cast<int32_t>(i)};
-            gwbasic::Value value = gwbasic::Value::makeInt(static_cast<int16_t>(pixelData[i]));
-            vars.setArrayElement(arrayName, indices, value);
+            std::vector<int32_t> indices = { static_cast<int32_t>(lb + static_cast<int32_t>(i)) };
+            uint8_t byteVal = pixelData[i];
+            bool ok = false;
+            switch (vt) {
+                case gwbasic::ValueType::Int16:
+                    ok = vars.setArrayElement(arrayName, indices, gwbasic::Value::makeInt(static_cast<int16_t>(byteVal)));
+                    break;
+                case gwbasic::ValueType::Single:
+                    ok = vars.setArrayElement(arrayName, indices, gwbasic::Value::makeSingle(static_cast<float>(byteVal)));
+                    break;
+                case gwbasic::ValueType::Double:
+                    ok = vars.setArrayElement(arrayName, indices, gwbasic::Value::makeDouble(static_cast<double>(byteVal)));
+                    break;
+                default: ok = false; break;
+            }
+            if (!ok) {
+                throwBasicError(13, "Type mismatch writing GET data", pos);
+            }
         }
         
         return 0;
     }
     
     uint16_t doPUT(const std::vector<uint8_t>& b, size_t& pos) {
+        debugDumpTokens("PUT:entry", b, pos);
         skipSpaces(b, pos);
         
         // Check for file PUT: PUT #filenumber, [recordnumber]
@@ -4673,7 +4706,8 @@ private:
         }
         
         // If we find an opening parenthesis, assume graphics PUT
-        if (!atEnd(b, lookAhead) && (b[lookAhead] == '(' || (b[lookAhead] >= 0x80 && tok && tok->getTokenName(b[lookAhead]) == "("))) {
+        if (!atEnd(b, lookAhead) && isSymbolAt(b, lookAhead, '(', "(")) {
+            debugDumpTokens("PUT:route-graphics", b, pos);
             return doGraphicsPUT(b, pos);
         }
         
@@ -4726,6 +4760,7 @@ private:
     uint16_t doGraphicsPUT(const std::vector<uint8_t>& b, size_t& pos) {
         // PUT [STEP] (x,y), arrayvar [,actionverb]
         skipSpaces(b, pos);
+        debugDumpTokens("PUTG:entry", b, pos);
         
         // Check for optional STEP keyword
         bool stepMode = false;
@@ -4735,14 +4770,14 @@ private:
                 stepMode = true;
                 ++pos;
                 skipSpaces(b, pos);
+                debugDumpTokens("PUTG:after-STEP", b, pos);
             }
         }
         
         // Parse position
-        if (atEnd(b, pos) || !(b[pos] == '(' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == "("))) {
+        if (!consumeSymbol(b, pos, '(', "(")) {
             throwBasicError(2, "Expected ( in PUT statement", pos);
         }
-        ++pos; // consume (
         
         skipSpaces(b, pos);
         
@@ -4752,10 +4787,9 @@ private:
         
         skipSpaces(b, pos);
         
-        if (atEnd(b, pos) || !(b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) {
+        if (!consumeSymbol(b, pos, ',', ",")) {
             throwBasicError(2, "Expected comma in PUT coordinates", pos);
         }
-        ++pos; // consume comma
         
         skipSpaces(b, pos);
         
@@ -4765,18 +4799,16 @@ private:
         
         skipSpaces(b, pos);
         
-        if (atEnd(b, pos) || !(b[pos] == ')' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ")"))) {
+        if (!consumeSymbol(b, pos, ')', ")")) {
             throwBasicError(2, "Expected ) in PUT coordinates", pos);
         }
-        ++pos; // consume )
         
         skipSpaces(b, pos);
         
         // Expect comma before array variable
-        if (atEnd(b, pos) || !(b[pos] == ',' || (b[pos] >= 0x80 && tok && tok->getTokenName(b[pos]) == ","))) {
+        if (!consumeSymbol(b, pos, ',', ",")) {
             throwBasicError(2, "Expected comma before array in PUT", pos);
         }
-        ++pos; // consume comma
         
         skipSpaces(b, pos);
         
@@ -4790,14 +4822,14 @@ private:
         
         // Optional action verb (PSET, PRESET, AND, OR, XOR)
         std::string mode = "PSET"; // default mode
-        if (!atEnd(b, pos) && (b[pos] == ',' || b[pos] == 0xF5)) {
+        if (!atEnd(b, pos) && isSymbolAt(b, pos, ',', ",")) {
             ++pos; // consume comma
             skipSpaces(b, pos);
             
             if (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
                 std::string actionWord;
-                while (!atEnd(b, pos) && std::isalpha(b[pos])) {
-                    actionWord.push_back(static_cast<char>(std::toupper(b[pos++])));
+                while (!atEnd(b, pos) && std::isalpha(static_cast<unsigned char>(b[pos]))) {
+                    actionWord.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(b[pos++]))));
                 }
                 
                 if (actionWord == "PSET" || actionWord == "PRESET" || 
@@ -4807,22 +4839,53 @@ private:
             }
         }
         
-        // Get pixel data from array
+        // Get pixel data from an existing 1-D numeric array (Int16/Single/Double)
         std::vector<uint8_t> pixelData;
-        
-        // For now, assume the array contains the raw pixel data
-        // In a full implementation, we'd need to decode the GW-BASIC format
-        auto* arraySlot = vars.tryGet(arrayName);
-        if (!arraySlot || !arraySlot->isArray) {
-            throwBasicError(9, "Subscript out of range", pos);
+        gwbasic::ValueType vt{}; uint8_t rank{}; std::vector<gwbasic::Dim> dims;
+        if (!arrayManager.getArrayInfo(arrayName, vt, rank, dims)) {
+            throwBasicError(9, "Subscript out of range or array not DIM'd", pos);
         }
-        
-        // Extract pixel data from array - simplified version
-        // This is a placeholder - full implementation would need proper format handling
-        pixelData = {8, 0, 8, 0}; // width=8, height=8 header
-        for (int i = 0; i < 64; i++) {
-            pixelData.push_back(static_cast<uint8_t>(i % 16)); // dummy pattern
+        if (rank != 1) {
+            throwBasicError(9, "Type mismatch: PUT requires a 1-D numeric array", pos);
         }
+        if (!(vt == gwbasic::ValueType::Int16 || vt == gwbasic::ValueType::Single || vt == gwbasic::ValueType::Double)) {
+            throwBasicError(13, "Type mismatch: PUT array must be numeric (INTEGER/SINGLE/DOUBLE)", pos);
+        }
+        int32_t lb = static_cast<int32_t>(dims[0].lb);
+        int32_t ub = static_cast<int32_t>(dims[0].ub);
+        int64_t count = static_cast<int64_t>(ub) - static_cast<int64_t>(lb) + 1;
+        if (count < 4) {
+            throwBasicError(5, "Illegal function call: PUT array too small (missing header)", pos);
+        }
+        // Read entire array into bytes (clamped to 0..255)
+        pixelData.reserve(static_cast<size_t>(count));
+        for (int64_t i = 0; i < count; ++i) {
+            std::vector<int32_t> idx = { static_cast<int32_t>(lb + static_cast<int32_t>(i)) };
+            gwbasic::Value v{};
+            if (!vars.getArrayElement(arrayName, idx, v)) {
+                throwBasicError(9, "Subscript out of range while reading PUT array", pos);
+            }
+            uint8_t bval = 0;
+            switch (vt) {
+                case gwbasic::ValueType::Int16:   bval = static_cast<uint8_t>(v.i & 0xFF); break;
+                case gwbasic::ValueType::Single:  bval = static_cast<uint8_t>(static_cast<int>(std::round(v.f)) & 0xFF); break;
+                case gwbasic::ValueType::Double:  bval = static_cast<uint8_t>(static_cast<int>(std::llround(v.d)) & 0xFF); break;
+                default: break;
+            }
+            pixelData.push_back(bval);
+        }
+        // Validate header-driven size (LE: width, height)
+        if (pixelData.size() < 4) {
+            throwBasicError(5, "Illegal function call: PUT header missing", pos);
+        }
+        int width = static_cast<int>(pixelData[0]) | (static_cast<int>(pixelData[1]) << 8);
+        int height = static_cast<int>(pixelData[2]) | (static_cast<int>(pixelData[3]) << 8);
+        int64_t needed = static_cast<int64_t>(4) + static_cast<int64_t>(width) * static_cast<int64_t>(height);
+        if (needed > static_cast<int64_t>(pixelData.size())) {
+            throwBasicError(5, "Illegal function call: PUT data truncated for specified width/height", pos);
+        }
+        // Trim to exact size expected by putBlock
+        pixelData.resize(static_cast<size_t>(needed));
         
         // Initialize graphics context if needed
         initializeGraphicsContext();
@@ -4839,8 +4902,9 @@ private:
         if (graphicsBufferCallback) {
             uint8_t* buffer = graphicsBufferCallback();
             if (buffer) {
-                // Assume current screen mode - in full implementation, track this
-                graphics.setMode(1, buffer); // Default to mode 1 for now
+                // Use last known screen mode if available; otherwise default to mode 1
+                int mode = (currentGraphicsMode_ >= 0) ? currentGraphicsMode_ : 1;
+                graphics.setMode(mode, buffer);
                 graphics.setDefaultColor(7); // Default to white
             }
         }

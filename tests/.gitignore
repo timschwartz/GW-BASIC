@@ -9,3 +9,4 @@ test_simple_error
 test_string_functions
 test_mem_and_deftype
 test_width
+test_graphics_get_put

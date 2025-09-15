@@ -341,7 +341,7 @@ Recent fixes:
 - ✅ **GraphicsContext**: Full graphics drawing API with Bresenham line algorithm, midpoint circle algorithm, and SDL3 pixel buffer integration
 - ⚠️ **Advanced Graphics**: GET, PUT statements for sprite/image manipulation
   - File GET/PUT for random-access records is complete (see File I/O System)
-  - Graphics GET/PUT is partially implemented: supports capturing/putting rectangular blocks, but uses a simplified array format and default mode; action verbs and full GW-BASIC block format are not yet compatible
+  - Graphics GET/PUT implemented with a simple, consistent block format: 4-byte header [LE width,height] + per-pixel color indices. Arrays must be 1-D numeric. PUT supports action verbs PSET (default), PRESET, AND, OR, XOR. Note: This retains a simplified format vs original GW-BASIC bitplane packing.
 - ❌ **Sound**: SOUND, PLAY, BEEP statements
 
 ## ❌ Not Implemented

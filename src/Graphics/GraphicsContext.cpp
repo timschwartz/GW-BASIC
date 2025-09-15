@@ -215,7 +215,12 @@ bool GraphicsContext::putBlock(int x, int y, const std::vector<uint8_t>& data, c
     }
     
     // Determine blend mode
-    bool isXor = (mode && std::string(mode) == "XOR");
+    std::string m = mode ? std::string(mode) : std::string("PSET");
+    std::transform(m.begin(), m.end(), m.begin(), [](unsigned char c){ return static_cast<char>(std::toupper(c)); });
+    bool isXor = (m == "XOR");
+    bool isAnd = (m == "AND");
+    bool isOr  = (m == "OR");
+    bool isPreset = (m == "PRESET");
     
     // Draw pixels
     size_t dataIndex = 4;
@@ -225,14 +230,25 @@ bool GraphicsContext::putBlock(int x, int y, const std::vector<uint8_t>& data, c
             int py = coords.second + dy;
             
             if (isValidCoordinate(px, py)) {
-                uint8_t newColor = data[dataIndex];
-                
+                uint8_t src = data[dataIndex];
+                uint8_t dst = getPixel(px, py);
+                uint8_t out = src;
                 if (isXor) {
-                    uint8_t currentColor = getPixel(px, py);
-                    newColor = currentColor ^ newColor;
+                    out = dst ^ src;
+                } else if (isAnd) {
+                    out = dst & src;
+                } else if (isOr) {
+                    out = (uint8_t)(dst | src);
+                } else if (isPreset) {
+                    // Treat PRESET as clearing where src is non-zero; otherwise leave dst
+                    out = (src != 0) ? 0 : dst;
+                } else {
+                    // PSET (default): copy src
+                    out = src;
                 }
-                
-                plotPixel(px, py, newColor);
+                // Clamp to mode color range
+                out = static_cast<uint8_t>(out % std::max(1, modeInfo_.maxColors));
+                plotPixel(px, py, out);
             }
             
             dataIndex++;
