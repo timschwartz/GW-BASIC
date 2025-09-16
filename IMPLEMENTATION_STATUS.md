@@ -269,6 +269,7 @@ This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be comp
 - ✅ **SDL3 Integration**: Modern graphics framework for cross-platform support
 - ✅ **Text Mode Emulation**: 80x25 character display with CGA-style colors
 - ✅ **Graphics Mode Support**: Complete SCREEN statement implementation with 14 video modes, dynamic window resizing (320x200 to 720x400), pixel buffer management, and scaled text overlay
+- ✅ **Window Resizing**: User-initiated window resizing with automatic aspect ratio maintenance across all screen modes, ensuring proper scaling of both text and graphics content
 - ✅ **Text Framebuffer**: Automatic character scaling system for text display in graphics modes with proper bounds checking and background support
 - ✅ **Keyboard Input**: Full keyboard handling with command history and event trap integration
 - ✅ **Function Key Support**: Complete F1-F10 function key implementation with soft key expansion and event trap integration
@@ -292,7 +293,8 @@ This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be comp
 - SDL3-based pixel buffer management with separate rendering paths for text mode and graphics mode with text overlay
 - Scaled character rendering using bitmap font data with proper bounds checking and background support
 - Graphics infrastructure with setScreenMode(), renderGraphics(), renderTextOverlay(), and renderCharScaled() functions
- - WIDTH integration: changeWidth() adjusts text columns (40/80/132) and resizes SDL window when in text mode; ignored safely in console builds
+- User-initiated window resizing with automatic aspect ratio maintenance using SDL_WINDOW_RESIZABLE flag and handleWindowResize() event handler
+- WIDTH integration: changeWidth() adjusts text columns (40/80/132) and resizes SDL window when in text mode; ignored safely in console builds
 
 ## ⚠️ Partially Implemented
 

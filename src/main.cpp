@@ -36,6 +36,10 @@ private:
     int cols = 80;
     int rows = 25;
     
+    // Window size tracking for resizing
+    int windowWidth = 720;
+    int windowHeight = 400;
+    
     // Current screen mode
     int currentScreenMode = 0;
     bool graphicsMode = false;
@@ -122,6 +126,34 @@ private:
     // Helper function to get effective text rows (excluding function key line)
     int getTextRows() const {
         return functionKeysEnabled ? rows - 1 : rows;
+    }
+    
+    // Aspect ratio helper functions
+    double getTargetAspectRatio() const {
+        return static_cast<double>(screenWidth) / static_cast<double>(screenHeight);
+    }
+    
+    // Calculate new window dimensions that maintain aspect ratio
+    void calculateAspectRatioConstrainedSize(int requestedWidth, int requestedHeight, 
+                                           int& newWidth, int& newHeight) const {
+        double targetRatio = getTargetAspectRatio();
+        double requestedRatio = static_cast<double>(requestedWidth) / static_cast<double>(requestedHeight);
+        
+        if (requestedRatio > targetRatio) {
+            // Requested window is too wide, constrain by height
+            newHeight = requestedHeight;
+            newWidth = static_cast<int>(requestedHeight * targetRatio);
+        } else {
+            // Requested window is too tall, constrain by width
+            newWidth = requestedWidth;
+            newHeight = static_cast<int>(requestedWidth / targetRatio);
+        }
+    }
+    
+    // Get rendering scale factors based on current window vs screen dimensions
+    void getScaleFactors(float& scaleX, float& scaleY) const {
+        scaleX = static_cast<float>(windowWidth) / static_cast<float>(screenWidth);
+        scaleY = static_cast<float>(windowHeight) / static_cast<float>(screenHeight);
     }
     
     // State
@@ -290,6 +322,10 @@ public:
             std::cerr << "SDL initialization failed: " << SDL_GetError() << std::endl;
             return false;
         }
+        
+        // Initialize window tracking with current screen dimensions
+        windowWidth = screenWidth;
+        windowHeight = screenHeight;
         
         window = SDL_CreateWindow("GW-BASIC",
                                   screenWidth, screenHeight,
@@ -622,8 +658,23 @@ private:
             break;
             
         case SDL_EVENT_WINDOW_RESIZED:
-            // Handle window resize if needed
+            handleWindowResize(event.window.data1, event.window.data2);
             break;
+        }
+    }
+    
+    void handleWindowResize(int newWidth, int newHeight) {
+        // Maintain aspect ratio when window is resized
+        int constrainedWidth, constrainedHeight;
+        calculateAspectRatioConstrainedSize(newWidth, newHeight, constrainedWidth, constrainedHeight);
+        
+        // Update our window tracking variables
+        windowWidth = constrainedWidth;
+        windowHeight = constrainedHeight;
+        
+        // If the constrained size differs from requested, resize the window
+        if (constrainedWidth != newWidth || constrainedHeight != newHeight) {
+            SDL_SetWindowSize(window, constrainedWidth, constrainedHeight);
         }
     }
     
@@ -1048,9 +1099,12 @@ private:
     }
     
     void renderTextMode() {
+        float scaleX, scaleY;
+        getScaleFactors(scaleX, scaleY);
+        
         for (int y = 0; y < rows; y++) {
             for (int x = 0; x < cols; x++) {
-                renderChar(x, y, screen[y][x]);
+                renderCharScaled(x, y, screen[y][x], scaleX, scaleY);
             }
         }
         
@@ -1058,10 +1112,10 @@ private:
         if (cursorVisible) {
             SDL_SetRenderDrawColor(renderer, WHITE.r, WHITE.g, WHITE.b, WHITE.a);
             SDL_FRect cursorRect = {
-                static_cast<float>(cursorX * CHAR_W),
-                static_cast<float>(cursorY * CHAR_H + CHAR_H - 2),
-                static_cast<float>(CHAR_W),
-                2.0f
+                static_cast<float>(cursorX * CHAR_W * scaleX),
+                static_cast<float>((cursorY * CHAR_H + CHAR_H - 2) * scaleY),
+                static_cast<float>(CHAR_W * scaleX),
+                2.0f * scaleY
             };
             SDL_RenderFillRect(renderer, &cursorRect);
         }
@@ -1086,8 +1140,11 @@ private:
             }
         }
         
-        // Render pixel buffer directly
+        // Render pixel buffer directly with scaling
         if (!pixelBuffer.empty() && pixelBuffer.size() >= static_cast<size_t>(screenWidth * screenHeight)) {
+            float scaleX, scaleY;
+            getScaleFactors(scaleX, scaleY);
+            
             for (int y = 0; y < screenHeight; y++) {
                 for (int x = 0; x < screenWidth; x++) {
                     size_t index = y * screenWidth + x;
@@ -1096,9 +1153,9 @@ private:
                         if (pixel.r || pixel.g || pixel.b) {  // Only draw non-black pixels for performance
                             SDL_SetRenderDrawColor(renderer, pixel.r, pixel.g, pixel.b, pixel.a);
                             SDL_FRect pixelRect = {
-                                static_cast<float>(x),
-                                static_cast<float>(y),
-                                1.0f, 1.0f
+                                static_cast<float>(x * scaleX),
+                                static_cast<float>(y * scaleY),
+                                scaleX, scaleY
                             };
                             SDL_RenderFillRect(renderer, &pixelRect);
                         }
@@ -1109,29 +1166,34 @@ private:
     }
     
     void renderTextOverlay() {
-        // Render text overlay for graphics modes
-        // Calculate scaling factors for text in graphics modes
-        float textScale = 1.0f;
+        // Render text overlay for graphics modes with window scaling
+        float scaleX, scaleY;
+        getScaleFactors(scaleX, scaleY);
         
-        // In low-resolution graphics modes, we might want to scale text appropriately
+        // Calculate base text scaling for graphics modes
+        float baseTextScale = 1.0f;
         if (screenWidth < 640) {
-            textScale = static_cast<float>(screenWidth) / 640.0f;
+            baseTextScale = static_cast<float>(screenWidth) / 640.0f;
         }
         
-        int scaledCharW = static_cast<int>(CHAR_W * textScale);
-        int scaledCharH = static_cast<int>(CHAR_H * textScale);
+        // Apply both base scaling and window scaling
+        float finalScaleX = baseTextScale * scaleX;
+        float finalScaleY = baseTextScale * scaleY;
+        
+        int scaledCharW = static_cast<int>(CHAR_W * finalScaleX);
+        int scaledCharH = static_cast<int>(CHAR_H * finalScaleY);
         
         // Only render non-space characters to allow graphics to show through
         for (int y = 0; y < rows; y++) {
             for (int x = 0; x < cols; x++) {
                 const auto& screenChar = screen[y][x];
                 if (screenChar.ch != ' ' && y < MAX_ROWS && x < MAX_COLS) {
-                    // Check if character would fit in the graphics window
-                    int charPixelX = x * scaledCharW;
-                    int charPixelY = y * scaledCharH;
+                    // Check if character would fit in the window
+                    int charPixelX = static_cast<int>(x * CHAR_W * finalScaleX);
+                    int charPixelY = static_cast<int>(y * CHAR_H * finalScaleY);
                     
-                    if (charPixelX + scaledCharW <= screenWidth && charPixelY + scaledCharH <= screenHeight) {
-                        renderCharScaled(x, y, screenChar, textScale);
+                    if (charPixelX + scaledCharW <= windowWidth && charPixelY + scaledCharH <= windowHeight) {
+                        renderCharScaled(x, y, screenChar, finalScaleX, finalScaleY);
                     }
                 }
             }
@@ -1139,16 +1201,16 @@ private:
         
         // Render cursor in graphics mode
         if (cursorVisible && cursorX >= 0 && cursorY >= 0 && cursorX < cols && cursorY < rows) {
-            int cursorPixelX = cursorX * scaledCharW;
-            int cursorPixelY = cursorY * scaledCharH;
+            int cursorPixelX = static_cast<int>(cursorX * CHAR_W * finalScaleX);
+            int cursorPixelY = static_cast<int>(cursorY * CHAR_H * finalScaleY);
             
-            if (cursorPixelX + scaledCharW <= screenWidth && cursorPixelY + scaledCharH <= screenHeight) {
+            if (cursorPixelX + scaledCharW <= windowWidth && cursorPixelY + scaledCharH <= windowHeight) {
                 SDL_SetRenderDrawColor(renderer, WHITE.r, WHITE.g, WHITE.b, WHITE.a);
                 SDL_FRect cursorRect = {
                     static_cast<float>(cursorPixelX),
-                    static_cast<float>(cursorPixelY + scaledCharH - 2),
+                    static_cast<float>(cursorPixelY + scaledCharH - 2 * finalScaleY),
                     static_cast<float>(scaledCharW),
-                    2.0f
+                    2.0f * finalScaleY
                 };
                 SDL_RenderFillRect(renderer, &cursorRect);
             }
@@ -1202,6 +1264,72 @@ private:
         // Scale font data
         float pixelScaleX = static_cast<float>(scaledCharW) / CHAR_W;
         float pixelScaleY = static_cast<float>(scaledCharH) / CHAR_H;
+        
+        for (int row = 0; row < CHAR_H; row++) {
+            uint8_t rowData = charData[row];
+            for (int col = 0; col < CHAR_W; col++) {
+                if (rowData & (0x80 >> col)) {
+                    // Draw scaled pixel(s)
+                    SDL_FRect pixelRect = {
+                        static_cast<float>(charPixelX + col * pixelScaleX),
+                        static_cast<float>(charPixelY + row * pixelScaleY),
+                        pixelScaleX,
+                        pixelScaleY
+                    };
+                    SDL_RenderFillRect(renderer, &pixelRect);
+                }
+            }
+        }
+    }
+    
+    // Overloaded version for separate X and Y scaling
+    void renderCharScaled(int x, int y, const ScreenChar& screenChar, float scaleX, float scaleY) {
+        int scaledCharW = static_cast<int>(CHAR_W * scaleX);
+        int scaledCharH = static_cast<int>(CHAR_H * scaleY);
+        
+        // Calculate pixel position
+        int charPixelX = static_cast<int>(x * CHAR_W * scaleX);
+        int charPixelY = static_cast<int>(y * CHAR_H * scaleY);
+        
+        // Bounds check - use window dimensions instead of screen dimensions
+        if (charPixelX + scaledCharW > windowWidth || charPixelY + scaledCharH > windowHeight) {
+            return;
+        }
+        
+        if (screenChar.ch == ' ') {
+            // Still render background for spaces
+            if (screenChar.bg.r != 0 || screenChar.bg.g != 0 || screenChar.bg.b != 0) {
+                SDL_SetRenderDrawColor(renderer, screenChar.bg.r, screenChar.bg.g, screenChar.bg.b, screenChar.bg.a);
+                SDL_FRect bgRect = {
+                    static_cast<float>(charPixelX),
+                    static_cast<float>(charPixelY),
+                    static_cast<float>(scaledCharW),
+                    static_cast<float>(scaledCharH)
+                };
+                SDL_RenderFillRect(renderer, &bgRect);
+            }
+            return;
+        }
+        
+        // Background
+        if (screenChar.bg.r != 0 || screenChar.bg.g != 0 || screenChar.bg.b != 0) {
+            SDL_SetRenderDrawColor(renderer, screenChar.bg.r, screenChar.bg.g, screenChar.bg.b, screenChar.bg.a);
+            SDL_FRect bgRect = {
+                static_cast<float>(charPixelX),
+                static_cast<float>(charPixelY),
+                static_cast<float>(scaledCharW),
+                static_cast<float>(scaledCharH)
+            };
+            SDL_RenderFillRect(renderer, &bgRect);
+        }
+        
+        // Render character using bitmap font with scaling
+        const uint8_t* charData = BitmapFont::getCharData(screenChar.ch);
+        SDL_SetRenderDrawColor(renderer, screenChar.fg.r, screenChar.fg.g, screenChar.fg.b, screenChar.fg.a);
+        
+        // Scale font data
+        float pixelScaleX = scaleX;
+        float pixelScaleY = scaleY;
         
         for (int row = 0; row < CHAR_H; row++) {
             uint8_t rowData = charData[row];
@@ -1317,6 +1445,10 @@ private:
         
         // Resize window if mode changed
         if (screenWidth != oldWidth || screenHeight != oldHeight) {
+            // Update window tracking variables
+            windowWidth = screenWidth;
+            windowHeight = screenHeight;
+            
             if (window) {
                 SDL_SetWindowSize(window, screenWidth, screenHeight);
             }
