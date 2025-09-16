@@ -56,9 +56,11 @@ public:
     using ClsCallback = std::function<bool()>;
     // INKEY$ callback: returns a single character from keyboard buffer, or empty string if no key pressed
     using InkeyCallback = std::function<std::string()>;
+    // Sound callback: play a note with frequency (Hz) for duration (ms)
+    using SoundCallback = std::function<void(double, int)>;
     
-    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr, ScreenModeCallback screenCb = nullptr, ColorCallback colorCb = nullptr, GraphicsBufferCallback graphicsBufCb = nullptr, WidthCallback widthCb = nullptr, LocateCallback locateCb = nullptr, ClsCallback clsCb = nullptr, InkeyCallback inkeyCb = nullptr)
-        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), fileManager(), userFunctionManager(&strHeap, tok), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb), colorCallback(colorCb), graphicsBufferCallback(graphicsBufCb), widthCallback(widthCb), locateCallback(locateCb), clsCallback(clsCb), inkeyCallback(inkeyCb), graphics() {
+    BasicDispatcher(std::shared_ptr<Tokenizer> t, std::shared_ptr<ProgramStore> p = nullptr, PrintCallback printCb = nullptr, InputCallback inputCb = nullptr, ScreenModeCallback screenCb = nullptr, ColorCallback colorCb = nullptr, GraphicsBufferCallback graphicsBufCb = nullptr, WidthCallback widthCb = nullptr, LocateCallback locateCb = nullptr, ClsCallback clsCb = nullptr, InkeyCallback inkeyCb = nullptr, SoundCallback soundCb = nullptr)
+        : tok(std::move(t)), prog(std::move(p)), ev(tok), vars(&deftbl), strHeap(heapBuf, sizeof(heapBuf)), arrayManager(&strHeap), eventTraps(), dataManager(prog, tok), fileManager(), userFunctionManager(&strHeap, tok), printCallback(printCb), inputCallback(inputCb), screenModeCallback(screenCb), colorCallback(colorCb), graphicsBufferCallback(graphicsBufCb), widthCallback(widthCb), locateCallback(locateCb), clsCallback(clsCb), inkeyCallback(inkeyCb), soundCallback(soundCb), graphics() {
         // Wire up cross-references
         vars.setStringHeap(&strHeap);
         vars.setArrayManager(&arrayManager);
@@ -256,6 +258,7 @@ private:
     LocateCallback locateCallback;
     ClsCallback clsCallback;
     InkeyCallback inkeyCallback;
+    SoundCallback soundCallback;
     uint16_t currentLine = 0; // Current line number being executed
     bool testMode = false; // Set to true to avoid waiting for input in tests
     GraphicsContext graphics; // Graphics drawing context
@@ -534,6 +537,8 @@ private:
                     return doGET(b, pos);
                 case 0x10: // CIRCLE
                     return doCIRCLE(b, pos);
+                case 0x12: // PLAY
+                    return doPLAY(b, pos);
                 case 0x13: // TIMER (extended statement)
                     return doTIMER(b, pos);
                 default:
@@ -4437,6 +4442,39 @@ private:
         return 0;
     }
     
+    uint16_t doPLAY(const std::vector<uint8_t>& b, size_t& pos) {
+        // PLAY string_expression
+        debugDumpTokens("PLAY:entry", b, pos);
+        skipSpaces(b, pos);
+        
+        // Parse string expression
+        auto result = ev.evaluate(b, pos, env);
+        pos = result.nextPos;
+        
+        // Convert to string
+        std::string musicString;
+        std::visit([&](auto&& x) {
+            using T = std::decay_t<decltype(x)>;
+            if constexpr (std::is_same_v<T, expr::Str>) {
+                musicString = x.v;
+            } else {
+                // For numeric values, convert to string representation
+                if constexpr (std::is_same_v<T, expr::Int16>) {
+                    musicString = std::to_string(x.v);
+                } else if constexpr (std::is_same_v<T, expr::Single>) {
+                    musicString = std::to_string(x.v);
+                } else if constexpr (std::is_same_v<T, expr::Double>) {
+                    musicString = std::to_string(x.v);
+                }
+            }
+        }, result.value);
+        
+        // Parse and execute the music string
+        playMusicString(musicString);
+        
+        return 0;
+    }
+    
     uint16_t doGET(const std::vector<uint8_t>& b, size_t& pos) {
         debugDumpTokens("GET:entry", b, pos);
         skipSpaces(b, pos);
@@ -5154,6 +5192,220 @@ private:
         }
         
         return 0;
+    }
+    
+private:
+    // Music string parser and player for PLAY command
+    void playMusicString(const std::string& musicString) {
+        // For now, just parse the music string and print what would be played
+        // In the future, this will generate actual audio
+        
+        if (printCallback) {
+            printCallback("PLAY: \"" + musicString + "\"\n");
+        }
+        
+        // Parse basic music notation
+        parseMusicNotation(musicString);
+    }
+    
+    void parseMusicNotation(const std::string& music) {
+        // Basic parser for GW-BASIC music notation
+        // Notes: A, B, C, D, E, F, G (with optional # or -)
+        // Octave: O followed by number (0-6)
+        // Length: L followed by number (1-64)
+        // Tempo: T followed by number (32-255)
+        // Pause: P followed by number
+        
+        size_t pos = 0;
+        int currentOctave = 4;  // Default octave
+        int currentLength = 4;  // Default note length (quarter note)
+        int currentTempo = 120; // Default tempo
+        
+        while (pos < music.length()) {
+            char c = std::toupper(music[pos]);
+            
+            switch (c) {
+                case 'A': case 'B': case 'C': case 'D': case 'E': case 'F': case 'G': {
+                    // Note with optional sharp/flat
+                    pos++;
+                    bool sharp = false, flat = false;
+                    if (pos < music.length() && music[pos] == '#') {
+                        sharp = true;
+                        pos++;
+                    } else if (pos < music.length() && music[pos] == '-') {
+                        flat = true;
+                        pos++;
+                    }
+                    
+                    // Parse optional length
+                    int noteLength = currentLength;
+                    if (pos < music.length() && std::isdigit(music[pos])) {
+                        noteLength = 0;
+                        while (pos < music.length() && std::isdigit(music[pos])) {
+                            noteLength = noteLength * 10 + (music[pos] - '0');
+                            pos++;
+                        }
+                    }
+                    
+                    playNote(c, sharp, flat, currentOctave, noteLength, currentTempo);
+                    break;
+                }
+                
+                case 'O': {
+                    // Octave
+                    pos++;
+                    if (pos < music.length() && std::isdigit(music[pos])) {
+                        currentOctave = music[pos] - '0';
+                        if (currentOctave < 0 || currentOctave > 6) {
+                            currentOctave = 4; // Reset to default on invalid octave
+                        }
+                        pos++;
+                    }
+                    break;
+                }
+                
+                case 'L': {
+                    // Length
+                    pos++;
+                    if (pos < music.length() && std::isdigit(music[pos])) {
+                        currentLength = 0;
+                        while (pos < music.length() && std::isdigit(music[pos])) {
+                            currentLength = currentLength * 10 + (music[pos] - '0');
+                            pos++;
+                        }
+                        if (currentLength < 1 || currentLength > 64) {
+                            currentLength = 4; // Reset to default on invalid length
+                        }
+                    }
+                    break;
+                }
+                
+                case 'T': {
+                    // Tempo
+                    pos++;
+                    if (pos < music.length() && std::isdigit(music[pos])) {
+                        currentTempo = 0;
+                        while (pos < music.length() && std::isdigit(music[pos])) {
+                            currentTempo = currentTempo * 10 + (music[pos] - '0');
+                            pos++;
+                        }
+                        if (currentTempo < 32 || currentTempo > 255) {
+                            currentTempo = 120; // Reset to default on invalid tempo
+                        }
+                    }
+                    break;
+                }
+                
+                case 'P': {
+                    // Pause
+                    pos++;
+                    int pauseLength = currentLength;
+                    if (pos < music.length() && std::isdigit(music[pos])) {
+                        pauseLength = 0;
+                        while (pos < music.length() && std::isdigit(music[pos])) {
+                            pauseLength = pauseLength * 10 + (music[pos] - '0');
+                            pos++;
+                        }
+                    }
+                    playPause(pauseLength, currentTempo);
+                    break;
+                }
+                
+                case ' ': case '\t': case '\n': case '\r': {
+                    // Skip whitespace
+                    pos++;
+                    break;
+                }
+                
+                default: {
+                    // Unknown character, skip it
+                    pos++;
+                    break;
+                }
+            }
+        }
+    }
+    
+    void playNote(char note, bool sharp, bool flat, int octave, int length, int tempo) {
+        // Calculate frequency for the note
+        double frequency = getNoteFrequency(note, sharp, flat, octave);
+        
+        // Calculate duration based on length and tempo
+        // Length is note value (1=whole, 2=half, 4=quarter, etc.)
+        // Tempo is in quarter notes per minute
+        int durationMs = calculateNoteDuration(length, tempo);
+        
+        if (soundCallback) {
+            soundCallback(frequency, durationMs);
+        } else if (printCallback) {
+            // Fallback to text output if no sound system
+            std::string noteStr = "";
+            noteStr += note;
+            if (sharp) noteStr += "#";
+            if (flat) noteStr += "-";
+            
+            printCallback("Note: " + noteStr + " Octave: " + std::to_string(octave) + 
+                         " Freq: " + std::to_string(frequency) + "Hz Duration: " + std::to_string(durationMs) + "ms\n");
+        }
+    }
+    
+    void playPause(int length, int tempo) {
+        // Calculate pause duration
+        int durationMs = calculateNoteDuration(length, tempo);
+        
+        if (soundCallback) {
+            // Pause is just silence (0 frequency)
+            soundCallback(0.0, durationMs);
+        } else if (printCallback) {
+            printCallback("Pause: Duration: " + std::to_string(durationMs) + "ms\n");
+        }
+    }
+    
+    double getNoteFrequency(char note, bool sharp, bool flat, int octave) {
+        // Base frequencies for notes in octave 4 (middle octave)
+        double baseFreq = 0.0;
+        
+        switch (note) {
+            case 'C': baseFreq = 261.63; break;
+            case 'D': baseFreq = 293.66; break;
+            case 'E': baseFreq = 329.63; break;
+            case 'F': baseFreq = 349.23; break;
+            case 'G': baseFreq = 392.00; break;
+            case 'A': baseFreq = 440.00; break;
+            case 'B': baseFreq = 493.88; break;
+            default: return 0.0; // Invalid note
+        }
+        
+        // Apply sharp/flat
+        if (sharp) {
+            baseFreq *= 1.0594630943593; // 2^(1/12) - semitone up
+        } else if (flat) {
+            baseFreq /= 1.0594630943593; // semitone down
+        }
+        
+        // Adjust for octave (each octave doubles or halves frequency)
+        int octaveDiff = octave - 4;
+        if (octaveDiff > 0) {
+            baseFreq *= (1 << octaveDiff); // multiply by 2^octaveDiff
+        } else if (octaveDiff < 0) {
+            baseFreq /= (1 << (-octaveDiff)); // divide by 2^abs(octaveDiff)
+        }
+        
+        return baseFreq;
+    }
+    
+    int calculateNoteDuration(int length, int tempo) {
+        // Calculate duration in milliseconds
+        // length: 1=whole note, 4=quarter note, etc.
+        // tempo: quarter notes per minute
+        
+        // Duration of a quarter note in milliseconds
+        double quarterNoteDuration = 60000.0 / tempo;
+        
+        // Duration of this note (quarter note duration * 4 / length)
+        double noteDuration = quarterNoteDuration * 4.0 / length;
+        
+        return static_cast<int>(noteDuration);
     }
 
 public:
