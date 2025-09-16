@@ -266,6 +266,11 @@ private:
     // Simulated DOS memory for PEEK/POKE and DEF SEG state
     std::vector<uint8_t> dosMemory;
     uint16_t currentSegment = 0;
+    
+    // DRAW statement state (mirrors GWRAM.ASM DRAW variables)
+    uint8_t drawScale = 0;     // DRWSCL: scale factor for drawing (0 = no scaling)
+    uint8_t drawFlags = 0;     // DRWFLG: drawing option flags (bit 7=no plot, bit 6=no move)
+    uint8_t drawAngle = 0;     // DRWANG: rotation angle (0-3 for 0°, 90°, 180°, 270°)
 
     // Helpers to convert between runtime Value and evaluator Value
     static expr::Value toExprValue(const gwbasic::Value& v) {
@@ -537,6 +542,8 @@ private:
                     return doGET(b, pos);
                 case 0x10: // CIRCLE
                     return doCIRCLE(b, pos);
+                case 0x11: // DRAW
+                    return doDRAW(b, pos);
                 case 0x12: // PLAY
                     return doPLAY(b, pos);
                 case 0x13: // TIMER (extended statement)
@@ -4442,6 +4449,35 @@ private:
         return 0;
     }
     
+    uint16_t doDRAW(const std::vector<uint8_t>& b, size_t& pos) {
+        // DRAW string_expression
+        debugDumpTokens("DRAW:entry", b, pos);
+        skipSpaces(b, pos);
+        
+        // Parse string expression
+        auto result = ev.evaluate(b, pos, env);
+        pos = result.nextPos;
+        
+        // Convert to string
+        std::string drawString;
+        std::visit([&](auto&& x) {
+            using T = std::decay_t<decltype(x)>;
+            if constexpr (std::is_same_v<T, expr::Str>) {
+                drawString = x.v;
+            } else {
+                throwBasicError(13, "Type mismatch: DRAW requires string", pos);
+            }
+        }, result.value);
+        
+        // Initialize graphics context if needed
+        initializeGraphicsContext();
+        
+        // Execute DRAW command string
+        executeDRAWString(drawString);
+        
+        return 0;
+    }
+    
     uint16_t doPLAY(const std::vector<uint8_t>& b, size_t& pos) {
         // PLAY string_expression
         debugDumpTokens("PLAY:entry", b, pos);
@@ -5406,6 +5442,238 @@ private:
         double noteDuration = quarterNoteDuration * 4.0 / length;
         
         return static_cast<int>(noteDuration);
+    }
+    
+    // DRAW statement implementation
+    void executeDRAWString(const std::string& drawString) {
+        size_t pos = 0;
+        
+        while (pos < drawString.length()) {
+            char cmd = std::toupper(drawString[pos]);
+            ++pos;
+            
+            // Skip spaces
+            while (pos < drawString.length() && std::isspace(drawString[pos])) {
+                ++pos;
+            }
+            
+            switch (cmd) {
+                case 'U': // Move up
+                    executeDRAWMove(0, -1, parseDrawParameter(drawString, pos));
+                    break;
+                case 'D': // Move down  
+                    executeDRAWMove(0, 1, parseDrawParameter(drawString, pos));
+                    break;
+                case 'L': // Move left
+                    executeDRAWMove(-1, 0, parseDrawParameter(drawString, pos));
+                    break;
+                case 'R': // Move right
+                    executeDRAWMove(1, 0, parseDrawParameter(drawString, pos));
+                    break;
+                case 'E': // Move diagonally down and right
+                    executeDRAWMove(1, 1, parseDrawParameter(drawString, pos));
+                    break;
+                case 'F': // Move diagonally up and right
+                    executeDRAWMove(1, -1, parseDrawParameter(drawString, pos));
+                    break;
+                case 'G': // Move diagonally up and left
+                    executeDRAWMove(-1, -1, parseDrawParameter(drawString, pos));
+                    break;
+                case 'H': // Move diagonally down and left
+                    executeDRAWMove(-1, 1, parseDrawParameter(drawString, pos));
+                    break;
+                case 'M': // Move to absolute or relative position
+                    executeDRAWMoveCommand(drawString, pos);
+                    break;
+                case 'A': // Set angle
+                    executeDRAWAngleCommand(drawString, pos);
+                    break;
+                case 'B': // Blank move (move without drawing)
+                    drawFlags |= 0x80; // Set no-plot flag
+                    break;
+                case 'N': // No move (draw without moving)
+                    drawFlags |= 0x40; // Set no-move flag
+                    break;
+                case 'C': // Set color
+                    executeDRAWColorCommand(drawString, pos);
+                    break;
+                case 'S': // Set scale
+                    executeDRAWScaleCommand(drawString, pos);
+                    break;
+                case 'X': // Execute substring
+                    executeDRAWExecuteCommand(drawString, pos);
+                    break;
+                case ' ': // Skip spaces
+                case '\t':
+                    break;
+                default:
+                    // Ignore unknown commands for compatibility
+                    break;
+            }
+        }
+    }
+    
+    int parseDrawParameter(const std::string& drawString, size_t& pos) {
+        int value = 1; // Default value
+        bool negative = false;
+        
+        // Skip spaces
+        while (pos < drawString.length() && std::isspace(drawString[pos])) {
+            ++pos;
+        }
+        
+        if (pos < drawString.length()) {
+            // Check for sign
+            if (drawString[pos] == '+') {
+                ++pos;
+            } else if (drawString[pos] == '-') {
+                negative = true;
+                ++pos;
+            }
+            
+            // Parse number
+            if (pos < drawString.length() && std::isdigit(drawString[pos])) {
+                value = 0;
+                while (pos < drawString.length() && std::isdigit(drawString[pos])) {
+                    value = value * 10 + (drawString[pos] - '0');
+                    ++pos;
+                }
+            }
+        }
+        
+        return negative ? -value : value;
+    }
+    
+    std::pair<int, int> transformDRAWCoordinates(int dx, int dy) {
+        // Apply angle rotation (0=0°, 1=90°, 2=180°, 3=270°)
+        int transformedDx = dx, transformedDy = dy;
+        
+        switch (drawAngle) {
+            case 0: // 0° - no rotation
+                break;
+            case 1: // 90° clockwise: (x,y) -> (y,-x)
+                transformedDx = dy;
+                transformedDy = -dx;
+                break;
+            case 2: // 180°: (x,y) -> (-x,-y)
+                transformedDx = -dx;
+                transformedDy = -dy;
+                break;
+            case 3: // 270° clockwise: (x,y) -> (-y,x)
+                transformedDx = -dy;
+                transformedDy = dx;
+                break;
+        }
+        
+        // Apply scaling if enabled
+        if (drawScale > 0) {
+            transformedDx = (transformedDx * drawScale) / 4;
+            transformedDy = (transformedDy * drawScale) / 4;
+        }
+        
+        return {transformedDx, transformedDy};
+    }
+    
+    void executeDRAWMove(int dirX, int dirY, int distance) {
+        auto [dx, dy] = transformDRAWCoordinates(dirX * distance, dirY * distance);
+        
+        // Get current graphics position
+        auto [currentX, currentY] = graphics.getCurrentPoint();
+        int newX = currentX + dx;
+        int newY = currentY + dy;
+        
+        bool shouldDraw = !(drawFlags & 0x80); // Check no-plot flag
+        bool shouldMove = !(drawFlags & 0x40);  // Check no-move flag
+        
+        if (shouldDraw) {
+            // Draw line from current position to new position
+            graphics.line(currentX, currentY, newX, newY);
+        }
+        
+        if (shouldMove) {
+            // Update current position
+            graphics.setCurrentPoint(newX, newY);
+        }
+        
+        // Clear drawing flags after use
+        drawFlags = 0;
+    }
+    
+    void executeDRAWMoveCommand(const std::string& drawString, size_t& pos) {
+        // Skip spaces
+        while (pos < drawString.length() && std::isspace(drawString[pos])) {
+            ++pos;
+        }
+        
+        bool relative = false;
+        if (pos < drawString.length() && (drawString[pos] == '+' || drawString[pos] == '-')) {
+            relative = true;
+        }
+        
+        int x = parseDrawParameter(drawString, pos);
+        
+        // Expect comma
+        while (pos < drawString.length() && std::isspace(drawString[pos])) {
+            ++pos;
+        }
+        if (pos < drawString.length() && drawString[pos] == ',') {
+            ++pos;
+        }
+        
+        int y = parseDrawParameter(drawString, pos);
+        
+        auto [currentX, currentY] = graphics.getCurrentPoint();
+        int targetX, targetY;
+        
+        if (relative) {
+            auto [dx, dy] = transformDRAWCoordinates(x, y);
+            targetX = currentX + dx;
+            targetY = currentY + dy;
+        } else {
+            targetX = x;
+            targetY = y;
+        }
+        
+        bool shouldDraw = !(drawFlags & 0x80);
+        bool shouldMove = !(drawFlags & 0x40);
+        
+        if (shouldDraw) {
+            graphics.line(currentX, currentY, targetX, targetY);
+        }
+        
+        if (shouldMove) {
+            graphics.setCurrentPoint(targetX, targetY);
+        }
+        
+        drawFlags = 0;
+    }
+    
+    void executeDRAWAngleCommand(const std::string& drawString, size_t& pos) {
+        int angle = parseDrawParameter(drawString, pos);
+        if (angle >= 0 && angle <= 3) {
+            drawAngle = static_cast<uint8_t>(angle);
+        }
+    }
+    
+    void executeDRAWColorCommand(const std::string& drawString, size_t& pos) {
+        int color = parseDrawParameter(drawString, pos);
+        if (color >= 0 && color <= 15) {
+            graphics.setDefaultColor(static_cast<uint8_t>(color));
+        }
+    }
+    
+    void executeDRAWScaleCommand(const std::string& drawString, size_t& pos) {
+        int scale = parseDrawParameter(drawString, pos);
+        if (scale >= 0 && scale <= 255) {
+            drawScale = static_cast<uint8_t>(scale);
+        }
+    }
+    
+    void executeDRAWExecuteCommand(const std::string& drawString, size_t& pos) {
+        // X command should execute a string variable
+        // For now, just skip the parameter as this requires variable lookup
+        // This is a simplified implementation
+        parseDrawParameter(drawString, pos);
     }
 
 public:
