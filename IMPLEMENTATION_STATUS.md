@@ -339,7 +339,8 @@ Recent fixes:
 - ✅ **Graphics Infrastructure**: SDL3-based pixel buffer management with separate rendering paths for text and graphics modes
 - ✅ **COLOR Statement**: Complete implementation with foreground and background color support (0-15 foreground, 0-7 background) using standard CGA/EGA/VGA 16-color palette
   - Border argument is parsed for compatibility and ignored; tokenizer-aware commas supported; immediate-mode handler consumes trailing tokens to prevent stray syntax errors
-- ✅ **Graphics Drawing**: Complete PSET, LINE, CIRCLE implementation with coordinate parsing, color support, and proper tokenization handling
+- ✅ **Graphics Drawing**: Complete PSET, LINE, CIRCLE, DRAW implementation with coordinate parsing, color support, and proper tokenization handling
+- ✅ **DRAW Statement**: Complete macro language implementation supporting all GW-BASIC commands (U/D/L/R movement, E/F/G/H diagonals, M absolute/relative moves, A angle rotation, S scaling, C color, B blank moves, N no-move draws, X subroutine execution) with state management, coordinate transformation, and proper string parameter parsing
 - ✅ **GraphicsContext**: Full graphics drawing API with Bresenham line algorithm, midpoint circle algorithm, and SDL3 pixel buffer integration
 - ⚠️ **Advanced Graphics**: GET, PUT statements for sprite/image manipulation
   - File GET/PUT for random-access records is complete (see File I/O System)
