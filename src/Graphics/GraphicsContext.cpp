@@ -184,17 +184,34 @@ bool GraphicsContext::getBlock(int x1, int y1, int x2, int y2, std::vector<uint8
     int height = maxY - minY + 1;
     
     // Format: [width, height, pixel_data...]
+    // Use IBM BASIC compatible format: pack 4 pixels per byte (2 bits each)
     data.clear();
     data.push_back(static_cast<uint8_t>(width & 0xFF));
     data.push_back(static_cast<uint8_t>((width >> 8) & 0xFF));
     data.push_back(static_cast<uint8_t>(height & 0xFF));
     data.push_back(static_cast<uint8_t>((height >> 8) & 0xFF));
     
-    // Copy pixel data
+    // Pack pixel data: 4 pixels per byte (2 bits each)
+    uint8_t packedByte = 0;
+    int pixelCount = 0;
+    
     for (int y = minY; y <= maxY; y++) {
         for (int x = minX; x <= maxX; x++) {
-            data.push_back(getPixel(x, y));
+            uint8_t pixel = getPixel(x, y) & 0x03; // Mask to 2 bits
+            packedByte |= (pixel << (6 - (pixelCount * 2))); // Pack from left to right
+            pixelCount++;
+            
+            if (pixelCount == 4) {
+                data.push_back(packedByte);
+                packedByte = 0;
+                pixelCount = 0;
+            }
         }
+    }
+    
+    // Handle remaining pixels if not divisible by 4
+    if (pixelCount > 0) {
+        data.push_back(packedByte);
     }
     
     return true;
@@ -210,7 +227,10 @@ bool GraphicsContext::putBlock(int x, int y, const std::vector<uint8_t>& data, c
     int width = data[0] | (data[1] << 8);
     int height = data[2] | (data[3] << 8);
     
-    if (data.size() < static_cast<size_t>(4 + width * height)) {
+    // Calculate expected packed data size: 4 pixels per byte
+    int totalPixels = width * height;
+    int expectedDataBytes = (totalPixels + 3) / 4; // Round up for partial bytes
+    if (data.size() < static_cast<size_t>(4 + expectedDataBytes)) {
         return false; // Not enough data
     }
     
@@ -222,15 +242,29 @@ bool GraphicsContext::putBlock(int x, int y, const std::vector<uint8_t>& data, c
     bool isOr  = (m == "OR");
     bool isPreset = (m == "PRESET");
     
-    // Draw pixels
+    // Draw pixels - unpack from 4-pixels-per-byte format
     size_t dataIndex = 4;
+    int pixelCount = 0;
+    uint8_t packedByte = 0;
+    
     for (int dy = 0; dy < height; dy++) {
         for (int dx = 0; dx < width; dx++) {
             int px = coords.first + dx;
             int py = coords.second + dy;
             
+            // Get next pixel from packed data
+            if (pixelCount == 0) {
+                if (dataIndex < data.size()) {
+                    packedByte = data[dataIndex++];
+                } else {
+                    packedByte = 0;
+                }
+            }
+            
+            uint8_t src = (packedByte >> (6 - (pixelCount * 2))) & 0x03;
+            pixelCount = (pixelCount + 1) % 4;
+            
             if (isValidCoordinate(px, py)) {
-                uint8_t src = data[dataIndex];
                 uint8_t dst = getPixel(px, py);
                 uint8_t out = src;
                 if (isXor) {
@@ -250,8 +284,6 @@ bool GraphicsContext::putBlock(int x, int y, const std::vector<uint8_t>& data, c
                 out = static_cast<uint8_t>(out % std::max(1, modeInfo_.maxColors));
                 plotPixel(px, py, out);
             }
-            
-            dataIndex++;
         }
     }
     

@@ -5047,7 +5047,10 @@ private:
         }
         int width = static_cast<int>(pixelData[0]) | (static_cast<int>(pixelData[1]) << 8);
         int height = static_cast<int>(pixelData[2]) | (static_cast<int>(pixelData[3]) << 8);
-        int64_t needed = static_cast<int64_t>(4) + static_cast<int64_t>(width) * static_cast<int64_t>(height);
+        // Calculate expected size for packed format: 4 pixels per byte
+        int totalPixels = width * height;
+        int expectedPackedBytes = (totalPixels + 3) / 4; // Round up for partial bytes
+        int64_t needed = static_cast<int64_t>(4) + static_cast<int64_t>(expectedPackedBytes);
         if (needed > static_cast<int64_t>(pixelData.size())) {
             throwBasicError(5, "Illegal function call: PUT data truncated for specified width/height", pos);
         }
