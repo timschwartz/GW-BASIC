@@ -540,6 +540,8 @@ private:
                     return doPUT(b, pos);
                 case 0x08: // GET
                     return doGET(b, pos);
+                case 0x0E: // PAINT
+                    return doPAINT(b, pos);
                 case 0x10: // CIRCLE
                     return doCIRCLE(b, pos);
                 case 0x11: // DRAW
@@ -3040,6 +3042,7 @@ private:
         currentGraphicsMode_ = mode;
         
         // Report mode change success
+        /*
         switch (mode) {
             case 0:
                 // Text mode (80x25 or 40x25)
@@ -3115,6 +3118,7 @@ private:
                 throwBasicError(5, "Illegal function call: Invalid screen mode " + std::to_string(mode), 0);
                 break;
         }
+        */
         
         return 0;
     }
@@ -4446,6 +4450,95 @@ private:
             // Circle failure is typically not an error
         }
         
+        return 0;
+    }
+    
+    // PAINT [STEP] (x, y) [, paintColor] [, borderColor]
+    uint16_t doPAINT(const std::vector<uint8_t>& b, size_t& pos) {
+        skipSpaces(b, pos);
+        debugDumpTokens("PAINT:entry", b, pos);
+
+        // Check for optional STEP keyword
+        bool stepMode = false;
+        if (consumeKeyword(b, pos, "STEP")) { 
+            stepMode = true; 
+            skipSpaces(b, pos); 
+            debugDumpTokens("PAINT:after-STEP", b, pos); 
+        }
+
+        // Expect opening parenthesis (ASCII or tokenized)
+        if (!consumeSymbol(b, pos, '(', "(")) {
+            debugDumpTokens("PAINT:expected-lparen", b, pos);
+            throwBasicError(2, "Expected ( in PAINT statement", pos);
+        }
+
+        skipSpaces(b, pos);
+
+        // Parse x coordinate
+        auto xRes = ev.evaluate(b, pos, env);
+        pos = xRes.nextPos;
+        int x = expr::ExpressionEvaluator::toInt16(xRes.value);
+
+        skipSpaces(b, pos);
+
+        int y = 0;
+        // Expect comma between x and y
+        if (consumeSymbol(b, pos, ',', ",")) {
+            skipSpaces(b, pos);
+            // Parse y coordinate
+            auto yRes = ev.evaluate(b, pos, env);
+            pos = yRes.nextPos;
+            y = expr::ExpressionEvaluator::toInt16(yRes.value);
+        } else {
+            throwBasicError(2, "Expected comma between coordinates in PAINT", pos);
+        }
+
+        skipSpaces(b, pos);
+
+        // Expect closing parenthesis (ASCII or tokenized)
+        if (!consumeSymbol(b, pos, ')', ")")) {
+            debugDumpTokens("PAINT:expected-rparen", b, pos);
+            throwBasicError(2, "Expected ) in PAINT statement", pos);
+        }
+
+        skipSpaces(b, pos);
+
+        // Optional paintColor parameter
+        int paintColor = -1;
+        int borderColor = -1;
+        if (consumeSymbol(b, pos, ',', ",")) {
+            skipSpaces(b, pos);
+            if (!atEnd(b, pos) && b[pos] != ',' && b[pos] != ':' && b[pos] != 0x00) {
+                auto colorRes = ev.evaluate(b, pos, env);
+                pos = colorRes.nextPos;
+                paintColor = expr::ExpressionEvaluator::toInt16(colorRes.value);
+                if (paintColor < 0 || paintColor > 15) {
+                    throwBasicError(5, "Illegal function call: Invalid paint color", pos);
+                }
+            }
+            skipSpaces(b, pos);
+            // Optional borderColor parameter
+            if (consumeSymbol(b, pos, ',', ",")) {
+                skipSpaces(b, pos);
+                if (!atEnd(b, pos) && b[pos] != ':' && b[pos] != 0x00) {
+                    auto borderRes = ev.evaluate(b, pos, env);
+                    pos = borderRes.nextPos;
+                    borderColor = expr::ExpressionEvaluator::toInt16(borderRes.value);
+                    if (borderColor < 0 || borderColor > 15) {
+                        throwBasicError(5, "Illegal function call: Invalid border color", pos);
+                    }
+                }
+            }
+        }
+
+        // Initialize graphics context if needed
+        initializeGraphicsContext();
+
+        // Execute PAINT
+        if (!graphics.paint(x, y, paintColor, borderColor, stepMode)) {
+            // PAINT failure is typically not an error in GW-BASIC
+        }
+
         return 0;
     }
     

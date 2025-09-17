@@ -236,7 +236,7 @@ This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be comp
 - ✅ **SCREEN Statement**: Complete implementation with 14 video modes (0-13), dynamic window resizing, graphics mode switching, and text framebuffer overlay for graphics modes
 - ✅ **Sequential File I/O**: Complete OPEN, CLOSE, PRINT#, INPUT# implementation with file mode support (INPUT/OUTPUT/APPEND), file number validation, and proper tokenizer integration for '#' operator and 'AS' keyword
 - ✅ **Random Access File Support**: OPEN with LEN for custom record lengths, plus FIELD/LSET/RSET and GET/PUT record I/O
-- ✅ **Graphics Drawing**: Complete PSET, LINE, CIRCLE implementation with coordinate parsing, color parameter support, proper tokenization handling for parentheses (244), commas (246), and minus operators (232), and integration with GraphicsContext API
+- ✅ **Graphics Drawing**: Complete PSET, LINE, CIRCLE, PAINT implementation with coordinate parsing, color parameter support, proper tokenization handling for parentheses (244), commas (246), and minus operators (232), flood fill algorithms for area filling, and integration with GraphicsContext API
 - ✅ **Error Handling Enhancement**: Improved error reporting with proper line number context for syntax errors, ensuring all expression evaluator exceptions are caught and re-thrown with line information
 - ✅ **OPEN Statement LEN Parameter**: Fixed tokenization and parsing issues with LEN parameter syntax, supporting multiple = token formats (0xD1, 0xD2, 0xE5) for robust parsing
 - ✅ **Complete Error Handling**: ON ERROR GOTO and RESUME statement implementation with proper error routing, ERL/ERR variables, ERROR statement simulation, and comprehensive error handler management
@@ -258,7 +258,8 @@ This is a modern C++ reimplementation of Microsoft GW-BASIC, designed to be comp
 - **FIXED**: OPEN statement LEN parameter parsing with support for multiple = token formats and flexible LEN keyword recognition
 - **NEW**: Complete DEF FN implementation with doDEF statement parsing, UserFunctionManager integration, and FN function call support
 - **NEW**: Enhanced error handling with proper line number reporting for all syntax errors, including expression evaluator exceptions
-- **NEW**: Complete graphics drawing implementation with doPSET, doLINE, doCIRCLE supporting coordinate parsing, color parameters, and proper token handling for parentheses (244), commas (246), closing parentheses (245), and minus operators (232)
+- **NEW**: Complete graphics drawing implementation with doPSET, doLINE, doCIRCLE, doPAINT supporting coordinate parsing, color parameters, flood fill algorithms for area filling, and proper token handling for parentheses (244), commas (246), closing parentheses (245), and minus operators (232)
+- **NEW**: Implemented PAINT extended statement with flood fill and boundary fill algorithms, supporting optional paintColor and borderColor parameters, proper STEP mode handling, and integration with GraphicsContext
 - **NEW**: Implemented FILES extended statement with path splitting, case-insensitive wildcard matching, and stable sorted output
 - **NEW**: Implemented KILL extended statement for file deletion with filesystem error handling and proper GW-BASIC error codes
 - **NEW**: Implemented NAME extended statement for file renaming with AS keyword parsing and comprehensive error handling for file conflicts

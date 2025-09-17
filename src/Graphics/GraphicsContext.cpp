@@ -352,3 +352,101 @@ void GraphicsContext::clipRectangle(int& x1, int& y1, int& x2, int& y2) const {
     x2 = std::min(modeInfo_.width - 1, x2);
     y2 = std::min(modeInfo_.height - 1, y2);
 }
+
+bool GraphicsContext::paint(int x, int y, int fillColor, int borderColor, bool step) {
+    auto coords = resolveCoordinates(x, y, step);
+    
+    if (!isValidCoordinate(coords.first, coords.second)) {
+        return false;
+    }
+    
+    uint8_t targetColor = getPixel(coords.first, coords.second);
+    uint8_t drawColor = (fillColor >= 0) ? static_cast<uint8_t>(fillColor) : defaultColor_;
+    
+    // If borderColor is specified, stop at that color boundary
+    // If not specified, fill until we hit a different color than the target
+    if (borderColor >= 0) {
+        uint8_t boundary = static_cast<uint8_t>(borderColor);
+        // Don't fill if we're already at the boundary color
+        if (targetColor == boundary) {
+            return false;
+        }
+        // Fill until we hit the boundary color
+        floodFillWithBoundary(coords.first, coords.second, drawColor, boundary);
+    } else {
+        // Standard flood fill - don't fill if target is same as fill color
+        if (targetColor == drawColor) {
+            return false;
+        }
+        floodFill(coords.first, coords.second, drawColor, targetColor);
+    }
+    
+    // Update current point
+    setCurrentPoint(coords.first, coords.second);
+    
+    return true;
+}
+
+void GraphicsContext::floodFill(int x, int y, uint8_t fillColor, uint8_t targetColor) {
+    if (!isValidCoordinate(x, y) || getPixel(x, y) != targetColor) {
+        return;
+    }
+    
+    // Use a simple stack-based flood fill to avoid recursion depth issues
+    std::vector<std::pair<int, int>> stack;
+    stack.push_back({x, y});
+    
+    while (!stack.empty()) {
+        auto [cx, cy] = stack.back();
+        stack.pop_back();
+        
+        if (!isValidCoordinate(cx, cy) || getPixel(cx, cy) != targetColor) {
+            continue;
+        }
+        
+        plotPixel(cx, cy, fillColor);
+        
+        // Add neighbors to stack
+        stack.push_back({cx + 1, cy});
+        stack.push_back({cx - 1, cy});
+        stack.push_back({cx, cy + 1});
+        stack.push_back({cx, cy - 1});
+    }
+}
+
+void GraphicsContext::floodFillWithBoundary(int x, int y, uint8_t fillColor, uint8_t boundaryColor) {
+    if (!isValidCoordinate(x, y)) {
+        return;
+    }
+    
+    uint8_t currentColor = getPixel(x, y);
+    if (currentColor == boundaryColor || currentColor == fillColor) {
+        return;
+    }
+    
+    // Use a simple stack-based flood fill to avoid recursion depth issues
+    std::vector<std::pair<int, int>> stack;
+    stack.push_back({x, y});
+    
+    while (!stack.empty()) {
+        auto [cx, cy] = stack.back();
+        stack.pop_back();
+        
+        if (!isValidCoordinate(cx, cy)) {
+            continue;
+        }
+        
+        uint8_t pixelColor = getPixel(cx, cy);
+        if (pixelColor == boundaryColor || pixelColor == fillColor) {
+            continue;
+        }
+        
+        plotPixel(cx, cy, fillColor);
+        
+        // Add neighbors to stack
+        stack.push_back({cx + 1, cy});
+        stack.push_back({cx - 1, cy});
+        stack.push_back({cx, cy + 1});
+        stack.push_back({cx, cy - 1});
+    }
+}

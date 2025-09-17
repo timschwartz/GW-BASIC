@@ -40,6 +40,9 @@ public:
     bool getBlock(int x1, int y1, int x2, int y2, std::vector<uint8_t>& data, bool step = false);
     bool putBlock(int x, int y, const std::vector<uint8_t>& data, const char* mode = "PSET", bool step = false);
     
+    // Fill operations
+    bool paint(int x, int y, int fillColor = -1, int borderColor = -1, bool step = false);
+    
     // Utility functions
     uint8_t getPixel(int x, int y) const;
     bool isValidCoordinate(int x, int y) const;
@@ -59,6 +62,8 @@ private:
     void drawCircleMidpoint(int cx, int cy, int radius, uint8_t color);
     void fillRectangle(int x1, int y1, int x2, int y2, uint8_t color);
     void drawRectangleOutline(int x1, int y1, int x2, int y2, uint8_t color);
+    void floodFill(int x, int y, uint8_t fillColor, uint8_t targetColor);
+    void floodFillWithBoundary(int x, int y, uint8_t fillColor, uint8_t boundaryColor);
     
     // Clipping helpers
     bool clipLine(int& x1, int& y1, int& x2, int& y2) const;
