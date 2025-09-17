@@ -99,6 +99,14 @@ public:
                 if (!slot->isArray) {
                     out = toExprValue(slot->scalar);
                     return true;
+                } else {
+                    // Array variable without indices - default to element 0
+                    std::vector<int32_t> defaultIndices{0};
+                    gwbasic::Value value;
+                    if (vars.getArrayElement(name, defaultIndices, value)) {
+                        out = toExprValue(value);
+                        return true;
+                    }
                 }
             }
             return false;
@@ -324,10 +332,77 @@ private:
     }
 
     gwbasic::Value toRuntimeValueForArray(const std::string& arrayName, const expr::Value& v) {
-        // For array assignment, determine type from the array's type rather than variable table
-        // since array elements must match the array's type
-        
+        // For array assignment, coerce to the array's element type (GW-BASIC semantics)
+        // rather than preserving the expression type. This avoids type mismatch errors
+        // like assigning a Single loop variable to an Integer (%) array.
+
+        // Discover target array element type
         gwbasic::Value out{};
+        gwbasic::ValueType arrVt{};
+        uint8_t rank = 0;
+        std::vector<gwbasic::Dim> dims;
+        bool haveInfo = arrayManager.getArrayInfo(arrayName, arrVt, rank, dims);
+
+        auto logDebug = [&](const gwbasic::Value& produced){
+            try {
+                std::ofstream ofs("/tmp/gwbasic_debug.log", std::ios::app);
+                if (!ofs) return;
+                ofs << "BasicDispatcher:toRuntimeValueForArray name='" << arrayName << "' exprType=";
+                std::visit([&](auto&& x){ using T = std::decay_t<decltype(x)>;
+                    if constexpr (std::is_same_v<T, expr::Int16>) ofs << "Int16 val=" << x.v;
+                    else if constexpr (std::is_same_v<T, expr::Single>) ofs << "Single val=" << x.v;
+                    else if constexpr (std::is_same_v<T, expr::Double>) ofs << "Double val=" << x.v;
+                    else if constexpr (std::is_same_v<T, expr::Str>) ofs << "Str len=" << x.v.size();
+                }, v);
+                ofs << " targetVt=" << (haveInfo ? static_cast<int>(arrVt) : -1)
+                    << " -> runtimeType=" << static_cast<int>(produced.type);
+                if (produced.type == gwbasic::ScalarType::Int16) ofs << " i16=" << produced.i;
+                ofs << "\n";
+            } catch (...) { /* ignore */ }
+        };
+
+        if (haveInfo) {
+            switch (arrVt) {
+                case gwbasic::ValueType::Int16: {
+                    int16_t i = expr::ExpressionEvaluator::toInt16(v);
+                    out = gwbasic::Value::makeInt(i);
+                    logDebug(out);
+                    return out;
+                }
+                case gwbasic::ValueType::Single: {
+                    float f = static_cast<float>(expr::ExpressionEvaluator::toDouble(v));
+                    out = gwbasic::Value::makeSingle(f);
+                    logDebug(out);
+                    return out;
+                }
+                case gwbasic::ValueType::Double: {
+                    double d = expr::ExpressionEvaluator::toDouble(v);
+                    out = gwbasic::Value::makeDouble(d);
+                    logDebug(out);
+                    return out;
+                }
+                case gwbasic::ValueType::String: {
+                    // Only strings allowed for string arrays
+                    if (std::holds_alternative<expr::Str>(v)) {
+                        const auto& s = std::get<expr::Str>(v).v;
+                        gwbasic::StrDesc sd{};
+                        if (!strHeap.allocCopy(reinterpret_cast<const uint8_t*>(s.data()), static_cast<uint16_t>(s.size()), sd)) {
+                            throwBasicError(7, "Out of string space", 0);
+                        }
+                        out = gwbasic::Value::makeString(sd);
+                        logDebug(out);
+                        return out;
+                    } else {
+                        // Let caller raise mismatch via setElement failure for now
+                        // but still create a best-effort numeric-to-string? No: GW-BASIC treats this as mismatch.
+                        logDebug(out);
+                        return out; // empty Value (type 0) will fail setElement for String arrays
+                    }
+                }
+            }
+        }
+
+        // Fallback: preserve prior behavior if array info is unavailable
         std::visit([&](auto&& x)->void{
             using T = std::decay_t<decltype(x)>;
             if constexpr (std::is_same_v<T, expr::Int16>) {
@@ -337,7 +412,6 @@ private:
             } else if constexpr (std::is_same_v<T, expr::Double>) {
                 out = gwbasic::Value::makeDouble(x.v);
             } else if constexpr (std::is_same_v<T, expr::Str>) {
-                // Allocate string in runtime heap
                 gwbasic::StrDesc sd{};
                 if (!strHeap.allocCopy(reinterpret_cast<const uint8_t*>(x.v.data()), static_cast<uint16_t>(x.v.size()), sd)) {
                     throwBasicError(7, "Out of string space", 0);
@@ -345,6 +419,7 @@ private:
                 out = gwbasic::Value::makeString(sd);
             }
         }, v);
+        logDebug(out);
         return out;
     }
 
@@ -1605,6 +1680,17 @@ private:
             
             // Convert expression value to runtime value and store in array
             gwbasic::Value runtimeValue = toRuntimeValueForArray(name, res.value);
+            // Debug: log array set request
+            try {
+                std::ofstream ofs("/tmp/gwbasic_debug.log", std::ios::app);
+                if (ofs) {
+                    ofs << "BasicDispatcher:handleLet arraySet name='" << name << "' indices=";
+                    for (size_t i = 0; i < indices.size(); ++i) ofs << (i?",":"[") << indices[i];
+                    ofs << "] rtType=" << static_cast<int>(runtimeValue.type);
+                    if (runtimeValue.type == gwbasic::ScalarType::Int16) ofs << " i16=" << runtimeValue.i;
+                    ofs << "\n";
+                }
+            } catch (...) { /* ignore */ }
             if (!vars.setArrayElement(name, indices, runtimeValue)) {
                 throwBasicError(9, "Subscript out of range or type mismatch", pos);
             }

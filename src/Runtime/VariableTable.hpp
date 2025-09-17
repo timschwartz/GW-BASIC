@@ -11,6 +11,7 @@
 #include "Value.hpp"
 #include "StringHeap.hpp"
 #include "ArrayManager.hpp"
+#include <fstream>
 
 namespace gwbasic {
 
@@ -199,8 +200,25 @@ public:
         if (it == table_.end() || !it->second.isArray) {
             return false; // Not an array variable
         }
-        
-        return arrayManager_->getElement(it->second.arrayName, indices, out);
+        // Debug: log get request
+        try {
+            std::ofstream ofs("/tmp/gwbasic_debug.log", std::ios::app);
+            if (ofs) {
+                ofs << "VariableTable:getArrayElement raw='" << rawName << "' norm='" << key.name << key.suffix << "' indices=";
+                for (size_t i = 0; i < indices.size(); ++i) ofs << (i?",":"[") << indices[i];
+                ofs << "] nameForAM='" << it->second.arrayName << "'\n";
+            }
+        } catch (...) { /* ignore */ }
+        bool ok = arrayManager_->getElement(it->second.arrayName, indices, out);
+        try {
+            std::ofstream ofs("/tmp/gwbasic_debug.log", std::ios::app);
+            if (ofs) {
+                ofs << "VariableTable:getArrayElement -> ok=" << ok << " out.type=" << static_cast<int>(out.type);
+                if (ok && out.type == ScalarType::Int16) ofs << " i16=" << out.i;
+                ofs << "\n";
+            }
+        } catch (...) { /* ignore */ }
+        return ok;
     }
 
     // Set array element
@@ -212,8 +230,25 @@ public:
         if (it == table_.end() || !it->second.isArray) {
             return false; // Not an array variable
         }
-        
-        return arrayManager_->setElement(it->second.arrayName, indices, value);
+        // Debug: log set request
+        try {
+            std::ofstream ofs("/tmp/gwbasic_debug.log", std::ios::app);
+            if (ofs) {
+                ofs << "VariableTable:setArrayElement raw='" << rawName << "' norm='" << key.name << key.suffix << "' indices=";
+                for (size_t i = 0; i < indices.size(); ++i) ofs << (i?",":"[") << indices[i];
+                ofs << "] nameForAM='" << it->second.arrayName << "' val.type=" << static_cast<int>(value.type);
+                if (value.type == ScalarType::Int16) ofs << " i16=" << value.i;
+                ofs << "\n";
+            }
+        } catch (...) { /* ignore */ }
+        bool ok = arrayManager_->setElement(it->second.arrayName, indices, value);
+        try {
+            std::ofstream ofs("/tmp/gwbasic_debug.log", std::ios::app);
+            if (ofs) {
+                ofs << "VariableTable:setArrayElement -> ok=" << ok << "\n";
+            }
+        } catch (...) { /* ignore */ }
+        return ok;
     }
 
     // Clear all variables (useful for NEW command)

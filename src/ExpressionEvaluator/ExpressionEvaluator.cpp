@@ -773,9 +773,19 @@ Value ExpressionEvaluator::parsePrimary(const std::vector<uint8_t>& b, size_t& p
         size_t savedPos = pos;
         auto id = readIdentifier(b, pos);
         
-        // Check if this is followed by an opening parenthesis
+        // Check if this is followed by an opening parenthesis (ASCII or tokenized)
         skipSpaces(b, pos);
-        if (!atEnd(b, pos) && (b[pos] == '(' || b[pos] == '[')) {
+        bool hasOpenParen = false;
+        if (!atEnd(b, pos)) {
+            uint8_t np = b[pos];
+            if (np == '(' || np == '[') {
+                hasOpenParen = true;
+            } else if (np >= 0x80 && tokenizer) {
+                std::string tn = tokenizer->getTokenName(np);
+                if (tn == "(" || tn == "[") hasOpenParen = true;
+            }
+        }
+        if (hasOpenParen) {
             // Decide between function call and array access
             if (isKnownFunction(id)) {
                 // Known function - always treat as function call

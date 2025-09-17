@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <fstream>
 
 namespace gwbasic {
 
@@ -127,6 +128,23 @@ bool ArrayManager::createArray(const std::string& name, ScalarType type, const s
     
     // Calculate strides and total count
     finalizeStrides(*array);
+
+    // Debug: log array creation details
+    try {
+        std::ofstream ofs("/tmp/gwbasic_debug.log", std::ios::app);
+        if (ofs) {
+            ofs << "ArrayManager:createArray name='" << name << "' norm='" << normName
+                << "' vt=" << static_cast<int>(array->vt)
+                << " elemSize=" << array->elemSize
+                << " rank=" << static_cast<int>(array->rank)
+                << " dims=";
+            for (size_t i = 0; i < array->dims.size(); ++i) {
+                const auto& d = array->dims[i];
+                ofs << "[" << d.lb << ":" << d.ub << ", stride=" << d.stride << "]";
+            }
+            ofs << " count=" << array->count << "\n";
+        }
+    } catch (...) { /* ignore */ }
     
     // Allocate data
     if (!allocateArrayData(*array)) {
@@ -156,7 +174,9 @@ bool ArrayManager::getElement(const std::string& name, const std::vector<int32_t
     const Array& array = *it->second;
     
     try {
-        uint8_t* elemPtr = array.elemPtr(indices);
+        // Compute flat index for logging
+        uint32_t flat = array.flatIndex(indices);
+        uint8_t* elemPtr = array.data + static_cast<uint64_t>(flat) * array.elemSize;
         
         switch (array.vt) {
             case ValueType::Int16:
@@ -172,6 +192,23 @@ bool ArrayManager::getElement(const std::string& name, const std::vector<int32_t
                 out = Value::makeString(*reinterpret_cast<const StrDesc*>(elemPtr));
                 break;
         }
+
+        // Debug: log getElement
+        try {
+            std::ofstream ofs("/tmp/gwbasic_debug.log", std::ios::app);
+            if (ofs) {
+                ofs << "ArrayManager:getElement name='" << name << "' norm='" << normName << "' indices=";
+                for (size_t i = 0; i < indices.size(); ++i) ofs << (i?",":"[") << indices[i];
+                ofs << "] flat=" << flat << " ptr=" << static_cast<const void*>(elemPtr);
+                ofs << " vt=" << static_cast<int>(array.vt);
+                if (array.vt == ValueType::Int16) {
+                    int16_t v = *reinterpret_cast<const int16_t*>(elemPtr);
+                    const uint8_t* pb = reinterpret_cast<const uint8_t*>(elemPtr);
+                    ofs << " val.i16=" << v << " bytes=[" << static_cast<int>(pb[0]) << "," << static_cast<int>(pb[1]) << "]";
+                }
+                ofs << "\n";
+            }
+        } catch (...) { /* ignore */ }
         return true;
     } catch (const std::out_of_range&) {
         return false; // Index out of bounds
@@ -188,7 +225,9 @@ bool ArrayManager::setElement(const std::string& name, const std::vector<int32_t
     Array& array = *it->second;
     
     try {
-        uint8_t* elemPtr = array.elemPtr(indices);
+        // Compute flat index for logging
+        uint32_t flat = array.flatIndex(indices);
+        uint8_t* elemPtr = array.data + static_cast<uint64_t>(flat) * array.elemSize;
         
         switch (array.vt) {
             case ValueType::Int16:
@@ -208,6 +247,22 @@ bool ArrayManager::setElement(const std::string& name, const std::vector<int32_t
                 *reinterpret_cast<StrDesc*>(elemPtr) = value.s;
                 break;
         }
+
+        // Debug: log setElement
+        try {
+            std::ofstream ofs("/tmp/gwbasic_debug.log", std::ios::app);
+            if (ofs) {
+                ofs << "ArrayManager:setElement name='" << name << "' norm='" << normName << "' indices=";
+                for (size_t i = 0; i < indices.size(); ++i) ofs << (i?",":"[") << indices[i];
+                ofs << "] flat=" << flat << " ptr=" << static_cast<void*>(elemPtr);
+                ofs << " vt=" << static_cast<int>(array.vt);
+                if (array.vt == ValueType::Int16) {
+                    const uint8_t* pb = reinterpret_cast<const uint8_t*>(elemPtr);
+                    ofs << " write.i16=" << value.i << " bytes=[" << static_cast<int>(pb[0]) << "," << static_cast<int>(pb[1]) << "]";
+                }
+                ofs << "\n";
+            }
+        } catch (...) { /* ignore */ }
         return true;
     } catch (const std::out_of_range&) {
         return false; // Index out of bounds
